@@ -20,7 +20,7 @@ return function(props)
 			return e and Color3.new(0, 0, 0) or Color3.new(1, 1, 1)
 		end, enabled),
 		
-		TextSize = 20,
+		TextSize = props.TextSize or 20,
 		Font = Enum.Font.SciFi,
 		
 		Activated = props.Activated,
