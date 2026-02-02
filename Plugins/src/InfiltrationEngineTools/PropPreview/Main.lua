@@ -154,37 +154,59 @@ function module:AddProp(basePart)
 		return
 	end
 
-	local storedModel = CustomPropsFolder._Value and CustomPropsFolder._Value:FindFirstChild(basePart.Name)
-		or ModelFolder._Value and ModelFolder._Value:FindFirstChild(basePart.Name)
-	if storedModel then
-		basePart.Transparency = 1
-
-		local model = storedModel:Clone()
-		for _, p in pairs(model:GetDescendants()) do
-			if p:IsA("BasePart") then
-				p.Archivable = false
-				p.CollisionGroup = COLLISON_GROUP
-			end
+	local altModelName = basePart:GetAttribute("AltPropModel")
+	local leverageMoveProp = basePart.Name == "LeverageMove" and basePart:GetAttribute("Prop")
+	local check = (type(altModelName) == "string" and altModelName ~= "" and altModelName) or (type(leverageMoveProp) == "string" and leverageMoveProp ~= "" and leverageMoveProp)
+	local storedModel = nil
+	if check then
+		if CustomPropsFolder._Value then
+			storedModel = CustomPropsFolder._Value:FindFirstChild(check)
 		end
-
-		Prop[basePart] = {
-			Model = model,
-			Events = {
-				basePart:GetPropertyChangedSignal("CFrame"):Connect(function()
-					self:RepositionProp(basePart)
-				end),
-				basePart.AttributeChanged:Connect(function()
-					HiddenModels[basePart] = nil
-					model.Parent = self.Folder
-					self:RecolorProp(basePart)
-				end),
-			},
-		}
-		model.Parent = self.Folder
-		BaseByModel[model] = basePart
-		self:RepositionProp(basePart)
-		self:RecolorProp(basePart)
+		if not storedModel and ModelFolder._Value then
+			storedModel = ModelFolder._Value:FindFirstChild(check)
+		end
 	end
+
+	if not storedModel then
+		storedModel = (CustomPropsFolder._Value and CustomPropsFolder._Value:FindFirstChild(basePart.Name))
+			or (ModelFolder._Value and ModelFolder._Value:FindFirstChild(basePart.Name))
+	end
+	if not storedModel then return end
+
+	local modelDescendants = storedModel:GetDescendants()
+	if #modelDescendants == 1 then
+		local onlyPart = modelDescendants[1]
+		if onlyPart:IsA("BasePart") and string.lower(onlyPart.Name) == "base" then
+			return
+		end
+	end
+	basePart.Transparency = 1
+
+	local model = storedModel:Clone()
+	for _, p in pairs(model:GetDescendants()) do
+		if p:IsA("BasePart") then
+			p.Archivable = false
+			p.CollisionGroup = COLLISON_GROUP
+		end
+	end
+
+	Prop[basePart] = {
+		Model = model,
+		Events = {
+			basePart:GetPropertyChangedSignal("CFrame"):Connect(function()
+				self:RepositionProp(basePart)
+			end),
+			basePart.AttributeChanged:Connect(function()
+				HiddenModels[basePart] = nil
+				model.Parent = self.Folder
+				self:RecolorProp(basePart)
+			end),
+		},
+	}
+	model.Parent = self.Folder
+	BaseByModel[model] = basePart
+	self:RepositionProp(basePart)
+	self:RecolorProp(basePart)
 end
 
 function module:RemoveProp(basePart)
@@ -205,6 +227,49 @@ end
 
 module.OverlaysEnabled = false
 module.EnabledState = State(false)
+
+-- Selection
+
+module.OverlaysHideModelsOnSelection = true
+module.HideModelsOnSelection = State(true)
+
+function module:SelectionCheck(overrideSelected)
+	local selectedParts = {}
+	local didSubstitution = false
+	for _, part in game.Selection:Get() do
+		local sub = BaseByModel[part]
+		if sub then
+			didSubstitution = true
+			selectedParts[sub] = true
+		else
+			selectedParts[part] = true
+		end
+	end
+
+	if didSubstitution then
+		local newList = {}
+		for p in selectedParts do
+			table.insert(newList, p)
+			game.Selection:Set(newList)
+		end
+	else
+		for base, model in HiddenModels do
+			if not selectedParts[base] or overrideSelected then
+				model.Parent = workspace
+				HiddenModels[base] = nil
+			end
+		end
+
+		if module.OverlaysHideModelsOnSelection then
+			for base in selectedParts do
+				if Prop[base] then
+					HiddenModels[base] = Prop[base].Model
+					HiddenModels[base].Parent = nil
+				end
+			end
+		end
+	end
+end
 
 function module:SetEnabled()
 	if self.Enabled then
@@ -237,38 +302,7 @@ function module:SetEnabled()
 			self:RemoveProp(p)
 		end),
 		game.Selection.SelectionChanged:Connect(function()
-			local selectedParts = {}
-			local didSubstitution = false
-			for _, part in game.Selection:Get() do
-				local sub = BaseByModel[part]
-				if sub then
-					didSubstitution = true
-					selectedParts[sub] = true
-				else
-					selectedParts[part] = true
-				end
-			end
-
-			if didSubstitution then
-				local newList = {}
-				for p in selectedParts do
-					table.insert(newList, p)
-					game.Selection:Set(newList)
-				end
-			else
-				for base, model in HiddenModels do
-					if not selectedParts[base] then
-						model.Parent = workspace
-						HiddenModels[base] = nil
-					end
-				end
-				for base in selectedParts do
-					if Prop[base] then
-						HiddenModels[base] = Prop[base].Model
-						HiddenModels[base].Parent = nil
-					end
-				end
-			end
+			self:SelectionCheck()
 		end),
 	}
 end
@@ -324,15 +358,15 @@ module.Init = function(mouse: PluginMouse)
 		return
 	end
 	module.Active = true
-	
+
 	if not module.ReplicatedChildAddedConnection then
 		module.ReplicatedChildAddedConnection = game.ReplicatedStorage.ChildAdded:Connect(ReplicatedStorageChildrenChanged)
 	end
-	
+
 	if not module.ReplicatedChildRemovedConnection then
 		module.ReplicatedChildRemovedConnection = game.ReplicatedStorage.ChildRemoved:Connect(ReplicatedStorageChildrenChanged)
 	end
-	
+
 	UpdateModelFolder()
 	if not ModelFolder._Value then
 		warn("No Assets folder found! Please read the Quick Start guide found here:\n\thttps://github.com/MoonstoneSkies/InfiltrationEngine-Custom-Missions/blob/main/README.md")
@@ -362,6 +396,24 @@ module.Init = function(mouse: PluginMouse)
 		Parent = game:GetService("CoreGui"),
 		Archivable = false,
 	}, {
+		Button({
+			Size = UDim2.new(0, 300, 0, 15),
+			TextSize = 15,
+			Enabled = module.HideModelsOnSelection,
+			Position = UDim2.new(0, 50, 0, 30),
+			Text = Derived(function(e)
+				return e and "Disable Prop Hiding" or "Enable Prop Hiding"
+			end, module.HideModelsOnSelection),
+			Activated = function()
+				module.OverlaysHideModelsOnSelection = not module.OverlaysHideModelsOnSelection
+				module.HideModelsOnSelection:set(module.OverlaysHideModelsOnSelection)
+				if module.OverlaysHideModelsOnSelection then
+					module:SelectionCheck()
+				else
+					module:SelectionCheck(true)
+				end
+			end,
+		}),
 		Button({
 			Size = UDim2.new(0, 300, 0, 30),
 			Enabled = module.EnabledState,
@@ -421,7 +473,7 @@ module.Clean = function()
 		module.ReplicatedChildAddedConnection:Disconnect()
 		module.ReplicatedChildAddedConnection = nil
 	end
-	
+
 	if module.ReplicatedChildRemovedConnection then 
 		module.ReplicatedChildRemovedConnection:Disconnect()
 		module.ReplicatedChildRemovedConnection = nil
