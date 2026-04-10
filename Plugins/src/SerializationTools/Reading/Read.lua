@@ -1,5 +1,6 @@
 local EncodingService = game:GetService("EncodingService")
 local HttpService = game:GetService("HttpService")
+local ScriptEditorService = game:GetService("ScriptEditorService")
 
 local StringConversion = require(script.Parent.Parent.Util.StringConversion)
 local InstanceTypes = require(script.Parent.Parent.Types.InstanceTypes)
@@ -7,6 +8,8 @@ local ReadInstance = require(script.Parent.ReadInstance)
 local EnumTypes = require(script.Parent.Parent.Types.Enums.Main)
 local VersionConfig = require(script.Parent.Parent.Util.VersionConfig)
 local ReadBuild = require(script.Parent.ReadBuild)
+local FeatureCheck = require(script.Parent.Parent.Util.FeatureCheck)
+local NodeTreeVisualizer = require(script.Parent.Parent.Util.NodeTreeVisualizer)
 
 local SIGNED_INT_BOUND = StringConversion.GetMaxNumber(3) / 2
 local INT_BOUND = StringConversion.GetMaxNumber(4)
@@ -237,6 +240,20 @@ Read = {
 		local stringMap
 		stringMap, cursor = Read.StringMap(str, cursor)
 		local node = Read.Instance(str, cursor, colorMap, stringMap)
+		if FeatureCheck("OutputNodeTree") == true then -- Tree visualizer for debugging - allows you to view what got properly serialized and what didn't
+			local outputModule = workspace:FindFirstChild(`SerializerNodeTreeOutput`) 
+			if outputModule then
+				outputModule:Destroy()
+			end
+			
+			outputModule = Instance.new(`ModuleScript`)
+			ScriptEditorService:UpdateSourceAsync(outputModule, function()
+				return `return {NodeTreeVisualizer(node)}`
+			end)
+			outputModule.Name = `SerializerNodeTreeOutput`
+			outputModule.Parent = workspace
+			ScriptEditorService:OpenScriptDocumentAsync(outputModule)
+		end
 		local mission = ReadBuild.construct(node)
 
 		-- Reading Color3s from TableMissionSetup
