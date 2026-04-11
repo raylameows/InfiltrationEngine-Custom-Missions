@@ -119,6 +119,7 @@ module.Init = function(mouse: PluginMouse)
 	local apiDevEnabled = FeatureCheck("APIDev") == true
 	local gistEnabled = FeatureCheck("ReadDocs") == true
 	local readbackEnabled = FeatureCheck("Readback") == true
+	local benchmarkEnabled 	= FeatureCheck("Benchmark") == true
 
 	module.UI = Create("ScreenGui", {
 		Parent = game:GetService("CoreGui"),
@@ -158,7 +159,7 @@ module.Init = function(mouse: PluginMouse)
 					local output = Write.MissionCodeHeader(GenerateMapId(), 1, 1)
 					output = output .. code
 					output = `!!!{not customSettings.EnforceCellLinks.Value and "\n\nEnforceCellLinks is disabled on this map\nThis mission is ineligible to be featured in the community missions tab\n" or ""}\nHow to play custom missions:\n\n1) Join the game and find "Custom Mission" in the mission menu\n2) Start a custom mission lobby\n3) Go to the table and open the custom mission loader\n4) Copy the URL of this page into the box and hit enter. It will NOT work if you copy the contents of this page instead of the URL.\n\nMission Name: {customSettings.MissionName.Value}\nCreator: {customSettings.AuthorName.Value}\nVersion: {customSettings.ExportVersion.Value}\nBriefing: {customSettings.MissionDesc.Value}\n\n!!!`
-						.. output
+					.. output
 
 					if workspace:FindFirstChild("CustomMissionCode") then
 						workspace.CustomMissionCode:Destroy()
@@ -186,6 +187,71 @@ module.Init = function(mouse: PluginMouse)
 					local preprocessed = GetMission()
 					preprocessed.Name = `{preprocessed.Name}_Preserialized`
 					preprocessed.Parent = workspace
+				end,
+			})
+			else nil,
+		if benchmarkEnabled -- Benchmarking is a process of performing a "cycle" (serializing then unserializing) the same mission a certain amount of times, with the default being 10.
+			--This gives us results such as the average serialization time, average deserialization time, and the total time it took to perform the benchmark.
+			then Button({
+				Size = UDim2.new(0, 200, 0, 30),
+				Enabled = module.EnabledState,
+				Position = UDim2.new(0, gistEnabled and 490 or 270, 0, 50),
+				Text = "Run Benchmark",
+				Activated = function()
+					if workspace:FindFirstChild("DebugMission") then
+						warn(`DebugMission should be in ReplicatedStorage for running benchmarks`)
+						return
+					end
+
+					local average = 0
+					local averageSerialize = 0
+					local averageDeserialize = 0
+					local amount = FeatureCheck(`BenchmarkAmount`, false)
+					if type(amount) ~= `number` then
+						if type(amount) ~= "nil" then
+							warn(`SerializerBenchmark : Benchmark amount should be a number, got {amount} instead. Will use default of 10 instead`)
+						end
+						amount = 10
+					end
+					local mainStart = os.clock()
+
+					for i = 1, amount do
+						print(`=== {i}/{amount} ===`)
+						local start = os.clock()
+						local code = GetMissionCode()
+						averageSerialize += (os.clock() - start)
+
+						if not workspace:FindFirstChild("DebugMission") then
+							local startDeserialize = os.clock()
+							local model = Read.Mission(code, 1)
+							averageDeserialize += (os.clock() - startDeserialize)
+							model:Destroy()
+						end
+
+						local result = (os.clock() - start)
+						print(`Time: {result}`)
+						average += result
+					end
+
+					average /= amount
+					local total = os.clock() - mainStart
+					local previous = workspace:FindFirstChild(`BenchmarkResults`)
+					if previous then previous:Destroy() end
+					local new = Instance.new(`ModuleScript`)
+					ScriptEditorService:UpdateSourceAsync(new, function()
+						return `return \{\n`..
+						`	Cycles = {amount},\n`..
+						`	Total = {total},\n`..
+						`	Average = \{\n`..
+						`		Serialize = {averageSerialize / amount},\n`..
+						`		Deserialize = {averageDeserialize / amount},\n`..
+						`		Cycle = {average}\n`..
+						`	}\n`..
+						`}`
+					end)
+					new.Name = `BenchmarkResults`
+					new.Parent = workspace
+					ScriptEditorService:OpenScriptDocumentAsync(new)
 				end,
 			})
 			else nil,
