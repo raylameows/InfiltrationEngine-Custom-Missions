@@ -1,6 +1,7 @@
 local StringConversion = require(script.Parent.Parent.Util.StringConversion)
 local InstanceTypes = require(script.Parent.Parent.Types.InstanceTypes)
 local ReadInstance = require(script.Parent.ReadInstance)
+local ReadProcessing = require(script.Parent.ReadProcessing)
 
 local EncodingService = game:GetService("EncodingService")
 
@@ -13,7 +14,6 @@ local INT_BOUND = StringConversion.GetMaxNumber(4)
 local BOUNDED_FLOAT_BOUND = StringConversion.GetMaxNumber(3)
 local SHORT_BOUNDED_FLOAT_BOUND = StringConversion.GetMaxNumber(2)
 
-local Root
 local Read
 
 local denormalize = function(value)
@@ -47,7 +47,8 @@ local function NewlineGSub(capture)
 	return "&"
 end
 
-local function ResolvePath(root, pathString)
+local function AttemptResolvePath(root, pathString)
+	if root == nil then return end
 	local current = root
 
 	for index in string.gmatch(pathString, "%d+") do
@@ -151,18 +152,24 @@ Read = {
 		return CFrame.new(X, Y, Z) * CFrame.fromEulerAnglesXYZ(rx, ry, rz), cursor
 	end,
 	
+	InstanceIdentifier = function(str, cursor)
+		local id
+		id, cursor = Read.Int(str, cursor)
+		return id, cursor
+	end,
+	
 	InstanceReference = function(str, cursor)
+		local id
+		id, cursor = Read.Int(str, cursor)
+		return id, cursor
+	end,
+	
+	LegacyInstanceReference = function(str, cursor)
 		local value, cursor = Read.String(str, cursor)
 
 		return function()
-			if Root then
-				if not Root:GetAttribute(`Loaded`) then
-					Root:GetAttributeChangedSignal(`Loaded`):Wait()
-				end
-				
-				local object = ResolvePath(Root, value)
-				return object
-			end
+			local object = AttemptResolvePath(ReadProcessing:peek(`root`), value)
+			return object
 		end, cursor
 	end,
 
@@ -262,7 +269,9 @@ Read = {
 			str = buffer.tostring( EncodingService:DecompressBuffer( EncodingService:Base64Decode(uncompressed), Enum.CompressionAlgorithm.Zstd ) )
 		end
 		
-		Root = nil
+		ReadProcessing:clear()
+		ReadProcessing:set(ReadProcessing.States.Reading)
+		ReadProcessing:remember(`idToInstance`, {})
 		local colorMap
 		colorMap, cursor = Read.ColorMap(str, cursor)
 		local stringMap
@@ -285,7 +294,11 @@ Read = {
 			MissionSetup.Source = StringMissionSetup.Value
 		end
 		
-		mission:SetAttribute(`Loaded`, true)
+		ReadProcessing:remember(`root`, mission)
+		ReadProcessing:set(ReadProcessing.States.PostProcessing)
+		ReadProcessing.Postprocessing:run()
+		ReadProcessing.Postprocessing:waitForFinish()
+		ReadProcessing:set(ReadProcessing.States.Done)
 		return mission
 	end,
 
@@ -295,11 +308,6 @@ Read = {
 		if InstanceId ~= InstanceTypes.Nil then
 			local InstanceType = InstanceKeys[InstanceId]
 			local object, cursor = ReadInstance[InstanceType](str, cursor, Read, colorMap, stringMap)
-			if not Root and object.Name == `DebugMission` then
-				Root = object
-				Root:SetAttribute(`Loaded`, false)
-			end
-			
 			while StringConversion.StringToNumber(str, cursor, 1) ~= 0 do
 				local child
 				child, cursor = Read.Instance(str, cursor, colorMap, stringMap)

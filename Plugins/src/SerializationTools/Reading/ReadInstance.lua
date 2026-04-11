@@ -7,6 +7,8 @@ local InstanceProperties = require(script.Parent.Parent.Types.InstanceProperties
 local DefaultProperties = require(script.Parent.Parent.Types.DefaultProperties)
 local AttributeTypes = require(script.Parent.Parent.Types.AttributeTypes)
 local AttributeValidation = require(script.Parent.Parent.AttributeValidation)
+local ReadProcessing = require(script.Parent.ReadProcessing)
+local VersionConfig = require(script.Parent.Parent.Util.VersionConfig)
 
 local AttributeKeys = {}
 for i, v in pairs(AttributeTypes) do
@@ -57,35 +59,52 @@ local CreateInstanceReader = function(instanceType, properties)
 	local InstanceReader = function(str, cursor, Read, colorMap, stringMap)
 		local newInstance = Instance.new(instanceType)
 		if defaults then
-			for k, v in defaults do
+			for k, v in (defaults) do
 				newInstance[k] = v
 			end
 		end
-		for i, v in pairs(properties) do -- sets all Instance properties to their default values as defined in InstanceProperties.lua
+		for i, v in (properties) do -- sets all Instance properties to their default values as defined in InstanceProperties.lua
 			newInstance[v[1]] = v[3]
 		end
+		
 		local propertyId = StringConversion.StringToNumber(str, cursor, 1)
 		cursor += 1
 		while not (propertyId == 0) do
-			local typeName = properties[propertyId][1]
-			local valueType = properties[propertyId][2]
-			if valueType == "Color3" then
-				local colorMapIndex
-				colorMapIndex, cursor = Read.ShortInt(str, cursor)
-				newInstance[typeName] = colorMap[colorMapIndex]
-			elseif valueType == "String" then
-				local stringMapIndex
-				stringMapIndex, cursor = Read.ShortInt(str, cursor)
-				newInstance[typeName] = stringMap[stringMapIndex]
-			elseif valueType == "InstanceReference" then
-				local set, newCursor = Read[valueType](str, cursor)
-				cursor = newCursor
-				task.spawn(function()
-					newInstance[typeName] = set()
-				end)
+			if propertyId == 71 then -- 71 acts as a reserved marker for instance IDs
+				local id
+				id, cursor = Read.InstanceIdentifier(str, cursor)
+				ReadProcessing:remember(id, newInstance, `idToInstance`)
+				newInstance:SetAttribute(`__InstanceIdentifier`, id) -- Useful for debugging to see if instances got their IDs assigned properly
 			else
-				newInstance[typeName], cursor = Read[valueType](str, cursor)
+				local typeName = properties[propertyId][1]
+				local valueType = properties[propertyId][2]
+				if valueType == "Color3" then
+					local colorMapIndex
+					colorMapIndex, cursor = Read.ShortInt(str, cursor)
+					newInstance[typeName] = colorMap[colorMapIndex]
+				elseif valueType == "String" then
+					local stringMapIndex
+					stringMapIndex, cursor = Read.ShortInt(str, cursor)
+					newInstance[typeName] = stringMap[stringMapIndex]
+				elseif valueType == "InstanceReference" then
+					if VersionConfig.InstanceIdentifiers then
+						local refId
+						refId, cursor = Read.InstanceReference(str, cursor)
+						ReadProcessing.Postprocessing:add(function()
+							newInstance[typeName] = ReadProcessing:peek(refId, `idToInstance`)
+						end)
+					else -- Backwards compatibility wih legacy instance references
+						local callback
+						callback, cursor = Read.LegacyInstanceReference(str, cursor)
+						ReadProcessing.Postprocessing:add(function()
+							newInstance[typeName] = callback()
+						end)
+					end
+				else
+					newInstance[typeName], cursor = Read[valueType](str, cursor)
+				end
 			end
+			
 			propertyId = StringConversion.StringToNumber(str, cursor, 1)
 			cursor += 1
 		end
@@ -110,11 +129,11 @@ local CreateProtectedInstanceReader = function(instanceType, properties)
 	local InstanceReader = function(str, cursor, Read, colorMap, stringMap)
 		local newProperties = {}
 		if defaults then
-			for k, v in defaults do
+			for k, v in (defaults) do
 				newProperties[k] = v
 			end
 		end
-		for i, v in pairs(properties) do -- sets all Instance properties to their default values as defined in InstanceProperties.lua
+		for i, v in (properties) do -- sets all Instance properties to their default values as defined in InstanceProperties.lua
 			newProperties[v[1]] = v[3]
 		end
 		local propertyId = StringConversion.StringToNumber(str, cursor, 1)
@@ -158,34 +177,57 @@ local CreateProtectedInstanceReader = function(instanceType, properties)
 			newInstance = cachedMeshPart:Clone()
 			newProperties.CollisionFidelity = nil
 			newProperties.RenderFidelity = nil
-			for k, v in newProperties do
+			for k, v in (newProperties) do
 				newInstance[k] = v
 			end
 			instanceInitialized = true
 		elseif meshId and ENABLE_ARBITRARY_MESHES then
-			-- CreateMeshPartAsync is likely less reliable than cloning, so prefer using ImportParts when possible
-			local success, instOrReason = pcall(function()
-				local part = InsertService:CreateMeshPartAsync(
-					`rbxassetid://{meshId}`,
-					newProperties["CollisionFidelity"] or Enum.CollisionFidelity.Default,
-					newProperties["RenderFidelity"] or Enum.RenderFidelity.Automatic
-				)
-				if CachedUserMeshFolder then
-					local copy = part:Clone()
-					copy.Name = meshId
-					copy.Parent = CachedUserMeshFolder
+			local inst = newInstance
+			newInstance.Transparency = 1
+			newInstance.CanCollide = false
+			
+			-- Run mesh creation in its own thread if possible to not slow down creation of other instances
+			-- Without Instance IDs, doing meshes in parallel would misalign the handling of legacy InstanceReference properties
+			local queue = VersionConfig.InstanceIdentifiers == true and `Background` or `Live`
+			ReadProcessing[queue]:add(function()
+				local success, meshPart = pcall(function()
+					return InsertService:CreateMeshPartAsync(
+						`rbxassetid://{meshId}`,
+						newProperties["CollisionFidelity"] or Enum.CollisionFidelity.Default,
+						newProperties["RenderFidelity"] or Enum.RenderFidelity.Automatic
+					)
+				end)
+
+				if success and meshPart then
+					for k, v in newProperties do
+						pcall(function()
+							meshPart[k] = v
+						end)
+					end
+					
+					if CachedUserMeshFolder then
+						local copy = meshPart:Clone()
+						copy.Name = meshId
+						copy.Parent = CachedUserMeshFolder
+					end
+					
+					if queue == `Background` then
+						ReadProcessing:waitForState(ReadProcessing.States.PostProcessing) -- Wait for reading of base instances to finish before replacing dummy part
+						
+						if inst and inst.Parent then
+							meshPart.CFrame = inst.CFrame
+							meshPart.Parent = inst.Parent
+							inst:Destroy()
+						end
+					elseif queue == `Live` then
+						meshPart.CFrame = inst.CFrame
+						meshPart.Parent = inst.Parent
+						inst:Destroy()
+					end
+					
+					newInstance = meshPart
 				end
-				return part
 			end)
-			newProperties.CollisionFidelity = nil
-			newProperties.RenderFidelity = nil
-			if success then
-				newInstance = instOrReason
-				for k, v in newProperties do
-					newInstance[k] = v
-				end
-				instanceInitialized = true
-			end
 		end
 
 		if not instanceInitialized then

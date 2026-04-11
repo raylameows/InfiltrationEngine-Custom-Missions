@@ -2,6 +2,7 @@ local StringConversion = require(script.Parent.Parent.Util.StringConversion)
 local InstanceProperties = require(script.Parent.Parent.Types.InstanceProperties)
 local AttributeTypes = require(script.Parent.Parent.Types.AttributeTypes)
 local AttributeValidation = require(script.Parent.Parent.AttributeValidation)
+local WriteProcessing = require(script.Parent.WriteProcessing)
 
 local function lookupMapIndex(map, value)
 	if value == nil then
@@ -70,6 +71,12 @@ end
 local CreateInstanceWriter = function(properties)
 	local WriteInstance = function(object, Write, colorMap, stringMap)
 		local str = ""
+		local id = WriteProcessing.Data.InstanceToID[object] 
+		if id then
+			str = str .. StringConversion.NumberToString(71, 1)
+			str = str .. Write.InstanceIdentifier(id)
+		end
+		
 		for i, v in pairs(properties) do
 			local value
 			if v[1] == "MeshId" and object.ClassName == "UnionOperation" then

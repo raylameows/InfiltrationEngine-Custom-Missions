@@ -5,7 +5,7 @@ local ExportButton = toolbar:CreateButton("Exporter", "Exporter", "rbxassetid://
 
 local Exporter = require(script.Parent.Writing.Main)
 
--- Should silence morgan's studio warnings about anti-tamper
+-- Should silence Morgan's studio warnings about anti-tamper
 local Api
 if runService:IsStudio() and not runService:IsRunMode() then
 	Api = require("./API/Main")

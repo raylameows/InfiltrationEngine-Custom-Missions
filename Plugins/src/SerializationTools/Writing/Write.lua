@@ -1,6 +1,8 @@
 local StringConversion = require(script.Parent.Parent.Util.StringConversion)
 local InstanceTypes = require(script.Parent.Parent.Types.InstanceTypes)
 local WriteInstance = require(script.Parent.WriteInstance)
+local WriteProcessing = require(script.Parent.WriteProcessing)
+local InstanceProperties = require(script.Parent.Parent.Types.InstanceProperties)
 
 local EncodingService = game:GetService("EncodingService")
 
@@ -31,20 +33,47 @@ local function CreateEnumWriter(keys)
 	end
 end
 
-local function GetIndex(object)
-	local parent = object.Parent
-	local children = parent:GetChildren()
-	
-	local index = 1
-	for _, child in children do
-		if child == object then
-			return index
-		elseif WriteInstance[child.ClassName] then -- Ignore unserialized instances
-			index += 1
+local function AssignID(object)
+	local possibleID = WriteProcessing.Data.InstanceToID[object]
+	if possibleID then
+		return possibleID
+	end
+
+	local set = WriteProcessing.Data.NextID
+	WriteProcessing.Data.NextID += 1
+
+	WriteProcessing.Data.InstanceToID[object] = set
+	return set
+end
+
+local function GetID(object)
+	return WriteProcessing.Data.InstanceToID[object]
+end
+
+local selector = {}
+local referencedProperties = {}
+for className, classData in (InstanceProperties) do
+	for _, propertyData in (classData) do
+		if propertyData[2] == `InstanceReference` then
+			if not table.find(selector, className) then
+				table.insert(selector, className)
+				referencedProperties[className] = {}
+			end
+			table.insert(referencedProperties[className], propertyData[1])
+		end
+	end
+end
+selector = table.concat(selector, `, `)
+local function GetReferenced(root)
+	local referenced = {}
+	for _, instance in (root:QueryDescendants(selector)) do
+		for _, property in (referencedProperties[instance.ClassName]) do
+			local ref = instance[property]
+			table.insert(referenced, ref)
 		end
 	end
 	
-	return index
+	return referenced
 end
 
 local ESCAPED_NEWLINES_ACTIVE = VersionConfig.ReplaceNewlines
@@ -194,27 +223,12 @@ Write = {
 		return Write.Int(#str) .. str
 	end,
 	
+	InstanceIdentifier = function(id)
+		return Write.Int(id)
+	end,
+	
 	InstanceReference = function(object)
-		local path = {}
-		local current = object
-		
-		-- Get parent path
-		while current and current.Parent and (current.Name ~= `DebugMission` and current ~= workspace) do
-			local index = GetIndex(current)
-			if index then
-				table.insert(path, index)
-			end
-			current = current.Parent
-		end
-		
-		-- Reverse order
-		for i = 1, math.floor(#path / 2) do
-			path[i], path[#path - i + 1] = path[#path - i + 1], path[i]
-		end
-		
-		-- Concat
-		path = table.concat(path, `.`)
-		return Write.String(path)
+		return Write.Int(GetID(object))
 	end,
 
 	ColorMap = function(colorMap)
@@ -243,7 +257,16 @@ Write = {
 
 	Mission = function(mission)
 		local str = ""
-
+		
+		WriteProcessing.Data = {
+			InstanceToID = {},
+			NextID = 1,
+		}
+		local Referenced = GetReferenced(mission) -- Get all the InstanceReference values
+		for _, ref in (Referenced) do
+			AssignID(ref) -- Only assign IDs to instances thar actually need IDs to save on string length
+		end
+		
 		local MissionSetup = require(mission:FindFirstChild("MissionSetup"):Clone())
 
 		while mission:FindFirstChild("StringMissionSetup") do
@@ -343,10 +366,12 @@ Write = {
 			end
 			local instanceType = StringConversion.NumberToString(InstanceTypes[className], 1)
 			local objectProperties, colorMap, stringMap = WriteInstance[className](object, Write, colorMap, stringMap)
-			local childrenProperties = ""
-			for i, v in pairs(object:GetChildren()) do
-				childrenProperties = childrenProperties .. Write.Instance(v, colorMap, stringMap)
+			local chunks = {}
+			for i, v in (object:GetChildren()) do
+				table.insert(chunks, (Write.Instance(v, colorMap, stringMap)))
 			end
+			
+			local childrenProperties = table.concat(chunks)
 			return instanceType .. objectProperties .. childrenProperties .. StringConversion.NumberToString(0, 1),
 			colorMap,
 			stringMap
