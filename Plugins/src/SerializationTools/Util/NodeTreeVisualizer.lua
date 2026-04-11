@@ -5,10 +5,11 @@ local PriorityOrder = {
 	Type = 2,
 	Properties = 3,
 	Attributes = 4,
-	Children = 5,
-	Expensives = 6,
-	Processed = 7,
-	Protecteds = 8,
+	CSG = 5,
+	Children = 6,
+	Expensives = 7,
+	Processed = 8,
+	Protecteds = 9,
 	-- Everything after is sorted alphabetically
 }
 local ValueHandlers = {

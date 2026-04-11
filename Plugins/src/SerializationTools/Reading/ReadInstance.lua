@@ -19,6 +19,18 @@ local DefaultFlags = { -- Some instances may use additional features, those are 
 }
 local rootNode
 
+--local PropertyHandlers = { -- I got lazy halfway through
+--	[`Color3`] = function()
+--		local colorMapIndex
+--		colorMapIndex, cursor = Read.ShortInt(str, cursor)
+--		node.Properties[typeName] = colorMap[colorMapIndex]
+--		return
+--	end,
+--	[`unknown`] = function(node, property, valueType)
+--		node.Properties[property], cursor = Read[valueType](str, cursor)
+--	end,
+--}
+
 local CreateInstanceReader = function(instanceType, properties, flags)
 	if not flags then flags = DefaultFlags end
 	local defaults = DefaultProperties[instanceType]
@@ -32,7 +44,7 @@ local CreateInstanceReader = function(instanceType, properties, flags)
 		}
 		if flags.Protected then -- Whether the Instance is protected
 			node.Protected = true
-			ReadBuild.rootNode.Protecteds += 1
+			ReadBuild.rootNode.Protecteds += 1 -- Inform the deserializer of a new protected instance
 		end
 
 		if defaults then
@@ -63,9 +75,12 @@ local CreateInstanceReader = function(instanceType, properties, flags)
 				if not node.Expensive then node.Expensive = {} end -- Create a dictionary of expensive properties in the node if it's missing
 				node.Expensive[typeName] = pathString -- Set the property as an expensive property. Expensive properties get special treatment during instance creation
 				ReadBuild.rootNode.Expensives += 1 -- Inform the code of how many expensive properties exist
+			elseif valueType == "CSG" then
+				node.CSG, cursor = Read.CSG(str, cursor, colorMap, stringMap)
 			else
 				node.Properties[typeName], cursor = Read[valueType](str, cursor)
 			end
+			
 			propertyId = StringConversion.StringToNumber(str, cursor, 1)
 			cursor += 1
 		end

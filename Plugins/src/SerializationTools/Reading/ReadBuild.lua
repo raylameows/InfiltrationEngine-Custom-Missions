@@ -2,12 +2,14 @@ local ReadBuild = {}
 ReadBuild.rootNode = nil
 
 local CollectionService = game:GetService("CollectionService")
+local GeometryService = game:GetService("GeometryService")
 local InsertService = game:GetService("InsertService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CachedUserMeshFolder = workspace:FindFirstChild("CachedUserMeshes")
 local ENABLE_ARBITRARY_MESHES = true
 
+local unionBuild
 local protectedBuild
 local build
 
@@ -100,16 +102,82 @@ local function handleExpensive(node, newInstance)
 	end
 end
 
+local function buildCSGPart(partNode)
+	if partNode.CSG then
+		return unionBuild(partNode, nil)
+	end
+
+	local part = Instance.new(`Part`)
+	applyProperties(part, partNode.Properties)
+	applyAttributes(part, partNode.Attributes)
+
+	part.Anchored = true
+	return part
+end
+
 -- // Instance Construction
+unionBuild = function(node, parent)
+	local parts = {}
+	for _, partNode in ipairs(node.CSG or {}) do
+		local part = buildCSGPart(partNode)
+		table.insert(parts, part)
+	end
+
+	local origin
+	local success, unionResults = pcall(function()
+		local remaining = table.clone(parts)
+		local main = remaining[1]
+		table.remove(remaining, 1)
+		origin = main.CFrame
+
+		return GeometryService:UnionAsync(main, remaining, {
+			SplitApart = false
+		})
+	end)
+
+	for _, p in parts do
+		p:Destroy()
+	end
+
+	local union
+	if not success or not unionResults then
+		union = Instance.new("Part")
+	else
+		union = unionResults[1]
+	end
+
+	applyProtectedProperties(union, node.Properties)
+	applyAttributes(union, node.Attributes)
+	checkChildren(node, union)
+	local cf = origin:ToObjectSpace(union.CFrame)
+	union.PivotOffset = cf
+	if node.Properties.CFrame then -- I don't know
+		union:PivotTo(node.Properties.CFrame)
+	end
+
+	node.Instance = union
+	union.Parent = parent
+
+	ReadBuild.rootNode.Processed += 1
+	return union
+end
+
 protectedBuild = function(node, parent)
 	local newInstance = Instance.new(`Part`)
 	local instanceInitialized = false
 	local meshId = node.Properties.MeshId
+	if meshId == "" and node.CSG and node.Type == `UnionOperation` then
+		return unionBuild(node, parent)
+	end
+
 	local id = meshId and node.Properties.MeshId:match("%d+")
 	if id and #id > 3 then
 		meshId = id
 	end
 	node.Properties.MeshId = nil
+	if node.Properties.UnionParts then
+		node.Properties.UnionParts = nil
+	end
 
 	local cachedMeshPart = meshId
 		and (

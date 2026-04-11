@@ -1,16 +1,11 @@
+local EncodingService = game:GetService("EncodingService")
+
 local StringConversion = require(script.Parent.Parent.Util.StringConversion)
 local InstanceTypes = require(script.Parent.Parent.Types.InstanceTypes)
 local WriteInstance = require(script.Parent.WriteInstance)
-
-local EncodingService = game:GetService("EncodingService")
-
-local FeatureCheck = require(script.Parent.Parent.Util.FeatureCheck)
-
-local EnumTypes = require(script.Parent.Parent.Types.Enums.Main)
-
 local VersionConfig = require(script.Parent.Parent.Util.VersionConfig)
-
-local Write
+local FeatureCheck = require(script.Parent.Parent.Util.FeatureCheck)
+local EnumTypes = require(script.Parent.Parent.Types.Enums.Main)
 
 local SHORTEST_INT_BOUND = StringConversion.GetMaxNumber(1)
 local SHORT_INT_BOUND = StringConversion.GetMaxNumber(2)
@@ -19,6 +14,11 @@ local LONG_INT_BOUND = StringConversion.GetMaxNumber(6)
 local SIGNED_INT_BOUND = math.floor(StringConversion.GetMaxNumber(3) / 2)
 local BOUNDED_FLOAT_BOUND = StringConversion.GetMaxNumber(3)
 local SHORT_BOUNDED_FLOAT_BOUND = math.floor(StringConversion.GetMaxNumber(2))
+
+local ESCAPED_NEWLINES_ACTIVE = VersionConfig.ReplaceNewlines
+local TAB_CHAR = utf8.char(9)
+
+local Write
 
 local normalize = function(value) -- normalizes an angle in radians (from -pi to pi) to 0-1
 	return (value + math.pi) / (math.pi * 2)
@@ -34,7 +34,7 @@ end
 local function GetIndex(object)
 	local parent = object.Parent
 	local children = parent:GetChildren()
-	
+
 	local index = 1
 	for _, child in children do
 		if child == object then
@@ -43,12 +43,9 @@ local function GetIndex(object)
 			index += 1
 		end
 	end
-	
+
 	return index
 end
-
-local ESCAPED_NEWLINES_ACTIVE = VersionConfig.ReplaceNewlines
-local TAB_CHAR = utf8.char(9)
 
 Write = {
 	Bool = function(bool) -- 1 character
@@ -193,11 +190,11 @@ Write = {
 		end
 		return Write.Int(#str) .. str
 	end,
-	
+
 	InstanceReference = function(object)
 		local path = {}
 		local current = object
-		
+
 		-- Get parent path
 		while current and current.Parent and (current.Name ~= `DebugMission` and current ~= workspace) do
 			local index = GetIndex(current)
@@ -206,12 +203,12 @@ Write = {
 			end
 			current = current.Parent
 		end
-		
+
 		-- Reverse order
 		for i = 1, math.floor(#path / 2) do
 			path[i], path[#path - i + 1] = path[#path - i + 1], path[i]
 		end
-		
+
 		-- Concat
 		path = table.concat(path, `.`)
 		return Write.String(path)
@@ -296,9 +293,9 @@ Write = {
 		local missionStr = colorMapStr .. stringMapStr .. str
 
 		if not VersionConfig.UseCompression then return missionStr end
-		
+
 		local compressLevel = FeatureCheck("SerializerCompressionLevel", false)
-		
+
 		if type(compressLevel) ~= "number" then
 			if type(compressLevel) ~= "nil" then
 				warn(`SerializerCompressionLevel : Expected int|nil, got {type(compressLevel)} {compressLevel}! Will use default of 4`)
@@ -321,7 +318,7 @@ Write = {
 
 		local buf = buffer.create(#missionStr)
 		buffer.writestring(buf, 0, missionStr)
-		
+
 		local compressedBuf = EncodingService:Base64Encode( EncodingService:CompressBuffer(buf, Enum.CompressionAlgorithm.Zstd, compressLevel) )
 
 		local compressedStr = buffer.readstring( compressedBuf, 0, buffer.len(compressedBuf) )
@@ -344,7 +341,7 @@ Write = {
 			local instanceType = StringConversion.NumberToString(InstanceTypes[className], 1)
 			local objectProperties, colorMap, stringMap = WriteInstance[className](object, Write, colorMap, stringMap)
 			local childrenProperties = ""
-			for i, v in pairs(object:GetChildren()) do
+			for i, v in (object:GetChildren()) do
 				childrenProperties = childrenProperties .. Write.Instance(v, colorMap, stringMap)
 			end
 			return instanceType .. objectProperties .. childrenProperties .. StringConversion.NumberToString(0, 1),
@@ -353,6 +350,33 @@ Write = {
 		else
 			return StringConversion.NumberToString(InstanceTypes.Nil, 1), colorMap, stringMap
 		end
+	end,
+
+	CSG = function(fragments, colorMap, stringMap)
+		local str = ""
+		local categories = {
+			BaseParts = {},
+			NegativeParts = {},
+			UnionOperations = {},
+		}
+		
+		for _, fragment in (fragments) do
+			if fragment:IsA(`BasePart`) then
+				table.insert(categories.BaseParts, fragment)
+			elseif fragment:IsA(`NegateOperation`) then
+				table.insert(categories.NegativeParts, fragment)
+			elseif fragment:IsA(`UnionOperation`) then
+				table.insert(categories.UnionOperations, fragment)
+			end
+		end
+		
+		for _, category in (categories) do
+			for _, part in (category) do
+				str = str .. (Write.Instance(part, colorMap, stringMap))
+			end
+		end
+		
+		return str
 	end,
 
 	Material = CreateEnumWriter(EnumTypes.Materials),

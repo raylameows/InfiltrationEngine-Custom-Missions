@@ -2,6 +2,7 @@ local StringConversion = require(script.Parent.Parent.Util.StringConversion)
 local InstanceProperties = require(script.Parent.Parent.Types.InstanceProperties)
 local AttributeTypes = require(script.Parent.Parent.Types.AttributeTypes)
 local AttributeValidation = require(script.Parent.Parent.AttributeValidation)
+local plugin = require(script.Parent.Parent.Util.PluginPass)()
 
 local WriteInstance
 local DefaultFlags = { -- Some instances may use additional features, those are enabled via flags
@@ -21,24 +22,30 @@ local function LookupMapIndex(map, value)
 		map[value] = idx
 		map[0] = idx -- Update size
 	end
-	
+
 	return idx
 end
 
 local function CreateInstanceWriter(properties, flags)
 	if not flags then flags = DefaultFlags end
-	
+
 	local InstanceWriter = function(object, Write, colorMap, stringMap)
 		local chunks = {}
 		for i, v in (properties) do
+			local property, valueType, defaultValue = unpack(v)
+			
 			local value
-			if v[1] == "MeshId" and object.ClassName == "UnionOperation" then
+			if property == "MeshId" and object.ClassName == "UnionOperation" then
 				value = object:GetAttribute("MeshId")
+				if not value then
+					continue
+				end
+			elseif valueType == "CSG" and object.ClassName == "UnionOperation" and not object:GetAttribute(`MeshId`) then
+				value = plugin:Separate({object})
 			else
-				value = object[v[1]]
+				value = object[property]
 			end
-			local valueType = v[2]
-			local defaultValue = v[3]
+			
 			if (valueType == "Color3") and (value ~= defaultValue) then
 				local index = LookupMapIndex(colorMap, value)
 				table.insert(chunks, StringConversion.NumberToString(i, 1))
@@ -49,13 +56,18 @@ local function CreateInstanceWriter(properties, flags)
 				table.insert(chunks, StringConversion.NumberToString(i, 1))
 				table.insert(chunks, Write.ShortInt(index))
 				continue
+			elseif (valueType == "CSG") then
+				table.insert(chunks, StringConversion.NumberToString(i, 1))
+				table.insert(chunks, Write.CSG(value, colorMap, stringMap))
+				continue
 			elseif value ~= defaultValue then
 				table.insert(chunks, StringConversion.NumberToString(i, 1))
 				table.insert(chunks, Write[valueType](value))
 			end
 		end
-		table.insert(chunks, StringConversion.NumberToString(0, 1)) -- Mark end of property serialization for this Instance
 		
+		table.insert(chunks, StringConversion.NumberToString(0, 1)) -- Mark end of property serialization for this Instance
+
 		if flags.Attributes then
 			local attributes = object:GetAttributes()
 			attributes = AttributeValidation.Validate(object.ClassName, object.Name, attributes, false)
@@ -101,7 +113,7 @@ local function CreateInstanceWriter(properties, flags)
 		local str = table.concat(chunks)
 		return str, colorMap, stringMap
 	end
-	
+
 	return InstanceWriter
 end
 

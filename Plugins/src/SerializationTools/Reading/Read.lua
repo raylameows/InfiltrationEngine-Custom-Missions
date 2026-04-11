@@ -296,10 +296,25 @@ Read = {
 					table.insert(node.Children, subNode) -- Put the child inside the children of the parent node
 				end
 			end
+			
 			return node, cursor + 1 -- Move to the next instance in the code string
 		else
 			return nil, cursor
 		end
+	end,
+	
+	CSG = function(str, cursor, colorMap, stringMap)
+		local fragments = {}
+		
+		while StringConversion.StringToNumber(str, cursor, 1) ~= 0 do
+			local fragmentNode
+			fragmentNode, cursor = Read.Instance(str, cursor, colorMap, stringMap)
+			if fragmentNode ~= nil then
+				table.insert(fragments, fragmentNode)
+			end
+		end
+		
+		return fragments, cursor
 	end,
 
 	Material = CreateEnumReader(Enum.Material, EnumTypes.Materials),

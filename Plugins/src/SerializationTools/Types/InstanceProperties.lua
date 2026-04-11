@@ -70,6 +70,8 @@ InstanceProperties = { -- any changes to this table should be changed in Instanc
 		{ "Material", "Material", "Plastic" },
 		{ "CastShadow", "Bool", false },
 		{ "MeshId", "String", "" },
+		{ "UsePartColor", "Bool", false },
+		{ "CSG", "CSG", {} }, -- Putting any properties after this breaks everything please someone help me why does this happen
 	},
 	Texture = {
 		{ "Name", "String", "Texture" },
