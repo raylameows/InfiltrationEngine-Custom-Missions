@@ -1,4 +1,5 @@
 local ScriptEditorService = game:GetService("ScriptEditorService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local InternalAPI = require(script.Parent.Parent.API.Internal)
 local Write = require(script.Parent.Write)
@@ -23,7 +24,7 @@ local PASTE_SIZE = MAX_PASTE_SIZE - PASTE_INFO_SIZE
 local module = {}
 
 local function GetMission()
-	local mission = workspace:FindFirstChild("DebugMission") or game.ReplicatedStorage:FindFirstChild("DebugMission")
+	local mission = workspace:FindFirstChild("DebugMission") or ReplicatedStorage:FindFirstChild("DebugMission")
 	if not mission then
 		error("No mission found: Mission must be named 'DebugMission' and placed in workspace or ReplicatedStorage")
 	end
@@ -57,7 +58,7 @@ local function GetMissionSetting(missionRoot, settingName, settingType, defaultV
 end
 
 local function InitCustomMissionSettings(incrementVersionNumber)
-	local mission = workspace:FindFirstChild("DebugMission") or game.ReplicatedStorage:FindFirstChild("DebugMission")
+	local mission = workspace:FindFirstChild("DebugMission") or ReplicatedStorage:FindFirstChild("DebugMission")
 	if not mission then
 		error("No mission found: Mission must be named 'DebugMission' and placed in workspace or ReplicatedStorage")
 	end

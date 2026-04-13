@@ -1,20 +1,27 @@
+local EncodingService = game:GetService("EncodingService")
+
 local StringConversion = require(script.Parent.Parent.Util.StringConversion)
 local InstanceTypes = require(script.Parent.Parent.Types.InstanceTypes)
 local ReadInstance = require(script.Parent.ReadInstance)
-
-local EncodingService = game:GetService("EncodingService")
-
+local VersionConfig = require(script.Parent.Parent.Util.VersionConfig)
 local EnumTypes = require(script.Parent.Parent.Types.Enums.Main)
 
-local VersionConfig = require(script.Parent.Parent.Util.VersionConfig)
-
-local SIGNED_INT_BOUND = StringConversion.GetMaxNumber(3) / 2
-local INT_BOUND = StringConversion.GetMaxNumber(4)
-local BOUNDED_FLOAT_BOUND = StringConversion.GetMaxNumber(3)
-local SHORT_BOUNDED_FLOAT_BOUND = StringConversion.GetMaxNumber(2)
-
-local Root
-local Read
+local StringConversionBase72 = StringConversion.B72
+local StringConversionBase256 = StringConversion.B256
+local Bounds = {
+	B72 = {
+		SIGNED_INT_BOUND = StringConversionBase72.GetMaxNumber(3) / 2,
+		INT_BOUND = StringConversionBase72.GetMaxNumber(4),
+		BOUNDED_FLOAT_BOUND = StringConversionBase72.GetMaxNumber(3),
+		SHORT_BOUNDED_FLOAT_BOUND = StringConversionBase72.GetMaxNumber(2),
+	},
+	B256 = {
+		SIGNED_INT_BOUND = StringConversionBase256.GetMaxNumber(3) / 2,
+		INT_BOUND = StringConversionBase256.GetMaxNumber(4),
+		BOUNDED_FLOAT_BOUND = StringConversionBase256.GetMaxNumber(3),
+		SHORT_BOUNDED_FLOAT_BOUND = StringConversionBase256.GetMaxNumber(2),
+	},
+}
 
 local denormalize = function(value)
 	return value * (2 * math.pi) - math.pi
@@ -63,6 +70,16 @@ local function ResolvePath(root, pathString)
 end
 
 Read = {
+	Base72 = {
+		ShortestInt = function(str, cursor) -- returns the value read as a shortest int. 1 symbol
+			return StringConversionBase72.StringToNumber(str, cursor, 1), cursor + 1
+		end,
+
+		ShortInt = function(str, cursor) -- returns the value read as a short integer. 2 symbols
+			return StringConversionBase72.StringToNumber(str, cursor, 2), cursor + 2
+		end,
+	},
+
 	Bool = function(str, cursor) -- returns the value read as a boolean. 1 symbol
 		return string.sub(str, cursor, cursor) == "b", cursor + 1
 	end,
@@ -84,12 +101,12 @@ Read = {
 	end,
 
 	SignedInt = function(str, cursor) -- returns the value read as a signed integer. 3 symbols
-		return StringConversion.StringToNumber(str, cursor, 3) - math.floor(SIGNED_INT_BOUND), cursor + 3
+		return StringConversion.StringToNumber(str, cursor, 3) - math.floor(Bounds[`B{StringConversion.Base}`].SIGNED_INT_BOUND), cursor + 3
 	end,
 
 	Float = function(str, cursor) -- returns the value read as a float. 5 symbols
 		local beforeDecimal, cursor = Read.SignedInt(str, cursor)
-		local afterDecimal = StringConversion.StringToNumber(str, cursor, 2) / SHORT_BOUNDED_FLOAT_BOUND
+		local afterDecimal = StringConversion.StringToNumber(str, cursor, 2) / Bounds[`B{StringConversion.Base}`].SHORT_BOUNDED_FLOAT_BOUND
 		return afterDecimal + beforeDecimal, cursor + 2
 	end,
 
@@ -150,7 +167,7 @@ Read = {
 		rz = denormalize(rz)
 		return CFrame.new(X, Y, Z) * CFrame.fromEulerAnglesXYZ(rx, ry, rz), cursor
 	end,
-	
+
 	InstanceReference = function(str, cursor)
 		local value, cursor = Read.String(str, cursor)
 
@@ -159,7 +176,7 @@ Read = {
 				if not Root:GetAttribute(`Loaded`) then
 					Root:GetAttributeChangedSignal(`Loaded`):Wait()
 				end
-				
+
 				local object = ResolvePath(Root, value)
 				return object
 			end
@@ -167,11 +184,11 @@ Read = {
 	end,
 
 	BoundedFloat = function(str, cursor) -- returns the value read as a bounded float between 0-1. 3 symbols.
-		return StringConversion.StringToNumber(str, cursor, 3) / BOUNDED_FLOAT_BOUND, cursor + 3
+		return StringConversion.StringToNumber(str, cursor, 3) / Bounds[`B{StringConversion.Base}`].BOUNDED_FLOAT_BOUND, cursor + 3
 	end,
 
 	ShortBoundedFloat = function(str, cursor) -- returns the value read as a bounded float between 0-1. 4 symbols.
-		return StringConversion.StringToNumber(str, cursor, 2) / SHORT_BOUNDED_FLOAT_BOUND, cursor + 2
+		return StringConversion.StringToNumber(str, cursor, 2) / Bounds[`B{StringConversion.Base}`].SHORT_BOUNDED_FLOAT_BOUND, cursor + 2
 	end,
 
 	Color3 = function(str, cursor)
@@ -230,14 +247,14 @@ Read = {
 		return stringMap, cursor
 	end,
 
-	MissionCodeHeader = function(str, cursor)
+	MissionCodeHeader = function(str, cursor) -- Mission header should always be read as B72
 		local codeVersion, mapId, currentCode, totalCodes
-		
-		codeVersion, cursor = Read.ShortestInt(str, cursor)
-		mapId, cursor = Read.ShortInt(str, cursor)
-		currentCode, cursor = Read.ShortInt(str, cursor)
-		totalCodes, cursor = Read.ShortInt(str, cursor)
-		
+
+		codeVersion, cursor = Read.Base72.ShortestInt(str, cursor)
+		mapId, cursor = Read.Base72.ShortInt(str, cursor)
+		currentCode, cursor = Read.Base72.ShortInt(str, cursor)
+		totalCodes, cursor = Read.Base72.ShortInt(str, cursor)
+
 		return {
 			CodeVersion = codeVersion,
 			CodeCurrent = currentCode,
@@ -247,21 +264,15 @@ Read = {
 	end,
 
 	Mission = function(str, cursor)
-		if str:sub(1, 3) == "!!!" then
-			local code = str:match("!!!.-!!!(.+)")
-			if not code then
-				error("Malformed opening comment")
-			end
-			str = code
-		end
-		
 		if VersionConfig.UseCompression then
-			local uncompressed = buffer.create(#str)
-			buffer.writestring(uncompressed, 0, str)
-
-			str = buffer.tostring( EncodingService:DecompressBuffer( EncodingService:Base64Decode(uncompressed), Enum.CompressionAlgorithm.Zstd ) )
+			local uncompressed = buffer.fromstring(str)
+			str = buffer.tostring(EncodingService:DecompressBuffer(EncodingService:Base64Decode(uncompressed), Enum.CompressionAlgorithm.Zstd))
 		end
-		
+
+		if not VersionConfig.Base256 then
+			StringConversion.OverrideBase(72)
+		end
+
 		Root = nil
 		local colorMap
 		colorMap, cursor = Read.ColorMap(str, cursor)
@@ -284,8 +295,9 @@ Read = {
 			MissionSetup.Parent = mission
 			MissionSetup.Source = StringMissionSetup.Value
 		end
-		
+
 		mission:SetAttribute(`Loaded`, true)
+		StringConversion.ResetBase()
 		return mission
 	end,
 
@@ -299,7 +311,7 @@ Read = {
 				Root = object
 				Root:SetAttribute(`Loaded`, false)
 			end
-			
+
 			while StringConversion.StringToNumber(str, cursor, 1) ~= 0 do
 				local child
 				child, cursor = Read.Instance(str, cursor, colorMap, stringMap)
@@ -328,7 +340,7 @@ Read = {
 
 	ResamplerMode = CreateEnumReader(Enum.ResamplerMode, EnumTypes.ResamplerMode),
 	SurfaceGuiSizingMode = CreateEnumReader(Enum.SurfaceGuiSizingMode, EnumTypes.SurfaceGuiSizingMode),
-	
+
 	TextureMode = CreateEnumReader(Enum.TextureMode, EnumTypes.TextureMode),
 }
 

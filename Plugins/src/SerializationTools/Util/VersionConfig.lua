@@ -1,9 +1,10 @@
-local VERSION_LATEST = 2
+local VERSION_LATEST = 3
 
 local CODE_VERSION_LOOKUP = {
-	[0] = { ReplaceNewlines = false, UseCompression = false },
-	[1] = { ReplaceNewlines = true, UseCompression = false },
-	[2] = { ReplaceNewlines = true, UseCompression = true }
+	[0] = { ReplaceNewlines = false, UseCompression = false, Base256 = false },
+	[1] = { ReplaceNewlines = true, UseCompression = false, Base256 = false },
+	[2] = { ReplaceNewlines = true, UseCompression = true, Base256 = false },
+	[3] = { ReplaceNewlines = true, UseCompression = true, Base256 = true },
 }
 
 -- This works, Lua counts table lengths starting from 1

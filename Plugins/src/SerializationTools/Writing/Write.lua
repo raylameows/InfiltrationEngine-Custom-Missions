@@ -1,40 +1,45 @@
-local StringConversion = require(script.Parent.Parent.Util.StringConversion)
-local InstanceTypes = require(script.Parent.Parent.Types.InstanceTypes)
-local WriteInstance = require(script.Parent.WriteInstance)
-
 local EncodingService = game:GetService("EncodingService")
-
-local FeatureCheck = require(script.Parent.Parent.Util.FeatureCheck)
-
-local EnumTypes = require(script.Parent.Parent.Types.Enums.Main)
-
-local VersionConfig = require(script.Parent.Parent.Util.VersionConfig)
 
 local Write
 
-local SHORTEST_INT_BOUND = StringConversion.GetMaxNumber(1)
-local SHORT_INT_BOUND = StringConversion.GetMaxNumber(2)
-local INT_BOUND = StringConversion.GetMaxNumber(4)
-local LONG_INT_BOUND = StringConversion.GetMaxNumber(6)
-local SIGNED_INT_BOUND = math.floor(StringConversion.GetMaxNumber(3) / 2)
-local BOUNDED_FLOAT_BOUND = StringConversion.GetMaxNumber(3)
-local SHORT_BOUNDED_FLOAT_BOUND = math.floor(StringConversion.GetMaxNumber(2))
+local StringConversion = require(script.Parent.Parent.Util.StringConversion)
+local InstanceTypes = require(script.Parent.Parent.Types.InstanceTypes)
+local WriteInstance = require(script.Parent.WriteInstance)
+local FeatureCheck = require(script.Parent.Parent.Util.FeatureCheck)
+local EnumTypes = require(script.Parent.Parent.Types.Enums.Main)
+local VersionConfig = require(script.Parent.Parent.Util.VersionConfig)
 
-local normalize = function(value) -- normalizes an angle in radians (from -pi to pi) to 0-1
+local StringConversionBase72 = StringConversion.B72
+local StringConversionBase256 = StringConversion.B256
+local BoundsCollecton = {}
+for index, base in ({"B72", "B256"}) do
+	BoundsCollecton[base] = {
+		SHORTEST_INT_BOUND = StringConversion[base].GetMaxNumber(1),
+		SHORT_INT_BOUND = StringConversion[base].GetMaxNumber(2),
+		INT_BOUND = StringConversion[base].GetMaxNumber(4),
+		LONG_INT_BOUND = StringConversion[base].GetMaxNumber(6),
+		SIGNED_INT_BOUND = math.floor(StringConversion[base].GetMaxNumber(3) / 2),
+		BOUNDED_FLOAT_BOUND = StringConversion[base].GetMaxNumber(3),
+		SHORT_BOUNDED_FLOAT_BOUND = math.floor(StringConversion[base].GetMaxNumber(2)),
+	}
+end
+local Bounds = BoundsCollecton[VersionConfig.Base256 and `B256` or `B72`]
+
+local function Normalize(value) -- Normalizes an angle in radians (from -pi to pi) to 0-1
 	return (value + math.pi) / (math.pi * 2)
 end
 
-local function CreateEnumWriter(keys)
+local function CreateEnumWriter(keys) -- Creates an Enum writer
 	return function(value)
 		local index = keys[value.Name] or 1
 		return StringConversion.NumberToString(index, 1)
 	end
 end
 
-local function GetIndex(object)
+local function GetIndex(object) -- Gets the index of the given object relative to the parent
 	local parent = object.Parent
 	local children = parent:GetChildren()
-	
+
 	local index = 1
 	for _, child in children do
 		if child == object then
@@ -43,7 +48,7 @@ local function GetIndex(object)
 			index += 1
 		end
 	end
-	
+
 	return index
 end
 
@@ -51,18 +56,35 @@ local ESCAPED_NEWLINES_ACTIVE = VersionConfig.ReplaceNewlines
 local TAB_CHAR = utf8.char(9)
 
 Write = {
+	Base72 = {
+		ShortestInt = function(num) -- 1 character
+			num = math.clamp(num, 0, Bounds.SHORTEST_INT_BOUND)
+			return StringConversionBase72.NumberToString(num, 1)
+		end,
+
+		ShortInt = function(num) -- 2 characters
+			if num > Bounds.SHORT_INT_BOUND then
+				return StringConversionBase72.NumberToString(Bounds.SHORT_INT_BOUND, 2)
+			elseif num < 0 then
+				return StringConversionBase72.NumberToString(0, 2)
+			else
+				return StringConversionBase72.NumberToString(num, 2)
+			end
+		end,
+	},
+
 	Bool = function(bool) -- 1 character
 		return if bool then "b" else "c"
 	end,
 
 	ShortestInt = function(num) -- 1 character
-		num = math.clamp(num, 0, SHORTEST_INT_BOUND)
+		num = math.clamp(num, 0, Bounds.SHORTEST_INT_BOUND)
 		return StringConversion.NumberToString(num, 1)
 	end,
 
 	ShortInt = function(num) -- 2 characters
-		if num > SHORT_INT_BOUND then
-			return StringConversion.NumberToString(SHORT_INT_BOUND, 2)
+		if num > Bounds.SHORT_INT_BOUND then
+			return StringConversion.NumberToString(Bounds.SHORT_INT_BOUND, 2)
 		elseif num < 0 then
 			return StringConversion.NumberToString(0, 2)
 		else
@@ -71,9 +93,9 @@ Write = {
 	end,
 
 	Int = function(num) -- 4 characters
-		if num > INT_BOUND then
+		if num > Bounds.INT_BOUND then
 			warn("Int out of bounds range:", num)
-			return StringConversion.NumberToString(INT_BOUND, 4)
+			return StringConversion.NumberToString(Bounds.INT_BOUND, 4)
 		elseif num < 0 then
 			warn("Int out of bounds range:", num)
 			return StringConversion.NumberToString(0, 4)
@@ -83,9 +105,9 @@ Write = {
 	end,
 
 	LongInt = function(num) -- 6 characters
-		if num > LONG_INT_BOUND then
+		if num > Bounds.LONG_INT_BOUND then
 			warn("Int out of bounds range:", num)
-			return StringConversion.NumberToString(LONG_INT_BOUND, 6)
+			return StringConversion.NumberToString(Bounds.LONG_INT_BOUND, 6)
 		elseif num < 0 then
 			warn("Int out of bounds range:", num)
 			return StringConversion.NumberToString(0, 6)
@@ -95,12 +117,12 @@ Write = {
 	end,
 
 	SignedInt = function(num) -- 3 characters
-		if num > SIGNED_INT_BOUND then
-			return StringConversion.NumberToString(SIGNED_INT_BOUND * 2, 3)
-		elseif num < SIGNED_INT_BOUND * -1 then
+		if num > Bounds.SIGNED_INT_BOUND then
+			return StringConversion.NumberToString(Bounds.SIGNED_INT_BOUND * 2, 3)
+		elseif num < Bounds.SIGNED_INT_BOUND * -1 then
 			return StringConversion.NumberToString(0, 3)
 		else
-			return StringConversion.NumberToString(num + SIGNED_INT_BOUND, 3)
+			return StringConversion.NumberToString(num + Bounds.SIGNED_INT_BOUND, 3)
 		end
 	end,
 
@@ -108,7 +130,7 @@ Write = {
 		local beforeDecimalStr = Write.SignedInt(math.floor(num))
 		local afterDecimalStr = StringConversion.NumberToString(
 			math.round(
-				(num - math.floor(num)) * SHORT_INT_BOUND
+				(num - math.floor(num)) * Bounds.SHORT_INT_BOUND
 			), 
 			2
 		)
@@ -149,9 +171,9 @@ Write = {
 		return Write.Float(frame.X)
 			.. Write.Float(frame.Y)
 			.. Write.Float(frame.Z)
-			.. Write.BoundedFloat(normalize(rx))
-			.. Write.BoundedFloat(normalize(ry))
-			.. Write.BoundedFloat(normalize(rz))
+			.. Write.BoundedFloat(Normalize(rx))
+			.. Write.BoundedFloat(Normalize(ry))
+			.. Write.BoundedFloat(Normalize(rz))
 	end,
 
 	BoundedFloat = function(num) -- 3 characters
@@ -161,7 +183,7 @@ Write = {
 		if num < 0 then
 			num = 0
 		end
-		return StringConversion.NumberToString(math.round(num * BOUNDED_FLOAT_BOUND), 3)
+		return StringConversion.NumberToString(math.round(num * Bounds.BOUNDED_FLOAT_BOUND), 3)
 	end,
 
 	ShortBoundedFloat = function(num) -- 2 characters
@@ -171,7 +193,7 @@ Write = {
 		if num < 0 then
 			num = 0
 		end
-		return StringConversion.NumberToString(math.round(num * SHORT_BOUNDED_FLOAT_BOUND), 2)
+		return StringConversion.NumberToString(math.round(num * Bounds.SHORT_BOUNDED_FLOAT_BOUND), 2)
 	end,
 
 	Color3 = function(color) -- 6 characters
@@ -193,11 +215,11 @@ Write = {
 		end
 		return Write.Int(#str) .. str
 	end,
-	
+
 	InstanceReference = function(object)
 		local path = {}
 		local current = object
-		
+
 		-- Get parent path
 		while current and current.Parent and (current.Name ~= `DebugMission` and current ~= workspace) do
 			local index = GetIndex(current)
@@ -206,12 +228,12 @@ Write = {
 			end
 			current = current.Parent
 		end
-		
+
 		-- Reverse order
 		for i = 1, math.floor(#path / 2) do
 			path[i], path[#path - i + 1] = path[#path - i + 1], path[i]
 		end
-		
+
 		-- Concat
 		path = table.concat(path, `.`)
 		return Write.String(path)
@@ -234,10 +256,10 @@ Write = {
 	end,
 
 	MissionCodeHeader = function(mapId, current, total)
-		local header = Write.ShortestInt(VersionConfig.VersionNumber)
-		header = header .. Write.ShortInt(mapId)
-		header = header .. Write.ShortInt(current)
-		header = header .. Write.ShortInt(total)
+		local header = Write.Base72.ShortestInt(VersionConfig.VersionNumber)
+		header = header .. Write.Base72.ShortInt(mapId)
+		header = header .. Write.Base72.ShortInt(current)
+		header = header .. Write.Base72.ShortInt(total)
 		return header
 	end,
 
@@ -270,6 +292,10 @@ Write = {
 		StringMissionSetup.Value = mission:FindFirstChild("MissionSetup").Source
 		StringMissionSetup.Parent = mission
 
+		-- Switch to Base72 if Base256 is not enabled
+		StringConversion.OverrideBase(VersionConfig.Base256 and 256 or 72)
+		Bounds = BoundsCollecton[StringConversion.BaseFullName]
+
 		-- Numeric index so as to not have the size collide with existing values
 		local colorMap = { [0] = 0 }
 		local stringMap = { [0] = 0 }
@@ -296,9 +322,9 @@ Write = {
 		local missionStr = colorMapStr .. stringMapStr .. str
 
 		if not VersionConfig.UseCompression then return missionStr end
-		
+
 		local compressLevel = FeatureCheck("SerializerCompressionLevel", false)
-		
+
 		if type(compressLevel) ~= "number" then
 			if type(compressLevel) ~= "nil" then
 				warn(`SerializerCompressionLevel : Expected int|nil, got {type(compressLevel)} {compressLevel}! Will use default of 4`)
@@ -321,7 +347,7 @@ Write = {
 
 		local buf = buffer.create(#missionStr)
 		buffer.writestring(buf, 0, missionStr)
-		
+
 		local compressedBuf = EncodingService:Base64Encode( EncodingService:CompressBuffer(buf, Enum.CompressionAlgorithm.Zstd, compressLevel) )
 
 		local compressedStr = buffer.readstring( compressedBuf, 0, buffer.len(compressedBuf) )
