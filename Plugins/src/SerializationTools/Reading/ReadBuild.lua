@@ -112,22 +112,31 @@ local function buildCSGPart(partNode)
 	applyAttributes(part, partNode.Attributes)
 
 	part.Anchored = true
-	return part
+	return part, partNode.Type
 end
 
 -- // Instance Construction
 unionBuild = function(node, parent)
 	local parts = {}
-	for _, partNode in ipairs(node.CSG or {}) do
-		local part = buildCSGPart(partNode)
-		table.insert(parts, part)
+	local negativeParts = {}
+
+	for _, partNode in (node.CSG or {}) do
+		local part, class = buildCSGPart(partNode)
+		if class == `NegateOperation` then
+			table.insert(negativeParts, part)
+		else
+			table.insert(parts, part)
+		end
 	end
 
 	local origin
+	local union
+
 	local success, unionResults = pcall(function()
 		local remaining = table.clone(parts)
 		local main = remaining[1]
 		table.remove(remaining, 1)
+
 		origin = main.CFrame
 
 		return GeometryService:UnionAsync(main, remaining, {
@@ -135,29 +144,44 @@ unionBuild = function(node, parent)
 		})
 	end)
 
+	if success and unionResults and unionResults[1] then
+		union = unionResults[1]
+	else
+		union = Instance.new("Part")
+	end
+
+	if #negativeParts > 0 then
+		local successSub, subResults = pcall(function()
+			return GeometryService:SubtractAsync(union, negativeParts, {
+				SplitApart = false
+			})
+		end)
+		
+		if successSub and subResults and subResults[1] then
+			union:Destroy()
+			union = subResults[1]
+		end
+	end
+
 	for _, p in parts do
 		p:Destroy()
 	end
-
-	local union
-	if not success or not unionResults then
-		union = Instance.new("Part")
-	else
-		union = unionResults[1]
+	for _, p in negativeParts do
+		p:Destroy()
 	end
 
 	applyProtectedProperties(union, node.Properties)
 	applyAttributes(union, node.Attributes)
 	checkChildren(node, union)
-	local cf = origin:ToObjectSpace(union.CFrame)
+
+	local cf = origin and origin:ToObjectSpace(union.CFrame) or CFrame.new()
 	union.PivotOffset = cf
-	if node.Properties.CFrame then -- I don't know
+	if node.Properties.CFrame then
 		union:PivotTo(node.Properties.CFrame)
 	end
 
 	node.Instance = union
 	union.Parent = parent
-
 	ReadBuild.rootNode.Processed += 1
 	return union
 end

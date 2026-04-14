@@ -36,6 +36,7 @@ local CreateInstanceReader = function(instanceType, properties, flags)
 	local defaults = DefaultProperties[instanceType]
 
 	local InstanceReader = function(str, cursor, Read, colorMap, stringMap)
+		if instanceType == `NegateOperation` then print(`Hola!`) end
 		local node = {
 			Type = instanceType, -- The type of the Instance
 			Children = {}, -- Children of the Instance
@@ -146,6 +147,7 @@ ReadInstance = {
 	Frame = CreateInstanceReader("Frame", InstanceProperties.Frame),
 	Beam = CreateInstanceReader("Beam", InstanceProperties.Beam),
 	Trail = CreateInstanceReader("Trail", InstanceProperties.Trail),
+	NegateOperation = CreateInstanceReader("NegateOperation", InstanceProperties.NegateOperation),
 }
 
 return ReadInstance

@@ -31,6 +31,7 @@ local function CreateInstanceWriter(properties, flags)
 
 	local InstanceWriter = function(object, Write, colorMap, stringMap)
 		local chunks = {}
+		if object.ClassName == `NegateOperation` then print(`Hola!`) end
 		for i, v in (properties) do
 			local property, valueType, defaultValue = unpack(v)
 			
@@ -145,6 +146,7 @@ WriteInstance = {
 	Frame = CreateInstanceWriter(InstanceProperties.Frame),
 	Beam = CreateInstanceWriter(InstanceProperties.Beam),
 	Trail = CreateInstanceWriter(InstanceProperties.Trail),
+	NegateOperation = CreateInstanceWriter(InstanceProperties.NegateOperation),
 }
 
 return WriteInstance

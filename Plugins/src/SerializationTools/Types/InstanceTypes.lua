@@ -27,6 +27,7 @@ local InstanceTypes = {
 	Frame = 26,
 	Beam = 27,
 	Trail = 28,
+	NegateOperation = 29,
 }
 
 return InstanceTypes

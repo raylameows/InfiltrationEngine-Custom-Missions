@@ -278,6 +278,18 @@ InstanceProperties = { -- any changes to this table should be changed in Instanc
 		{ "MinLength", "Float", 0.1 },
 		{ "WidthScale", "FloatSequence", NumberSequence.new(1) },
 	},
+	NegateOperation = {
+		{ "Name", "String", "Part" },
+		{ "CFrame", "CFrame", CFrame.new() },
+		{ "Color", "Color3", Color3.new() },
+		{ "Size", "Vector3", Vector3.new() },
+		{ "Anchored", "Bool", true },
+		{ "CanCollide", "Bool", true },
+		{ "Transparency", "ShortBoundedFloat", 0 },
+		{ "Material", "Material", "Plastic" },
+		{ "CastShadow", "Bool", false },
+		--{ "Shape", "PartType", "Block" },
+	},
 }
 
 return InstanceProperties
