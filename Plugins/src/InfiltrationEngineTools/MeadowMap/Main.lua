@@ -96,7 +96,7 @@ local function OpenZone(newZone)
 	end
 
 	local DoorNodes = {}
-	for _, prop in pairs(workspace.DebugMission.Props:GetChildren()) do
+	for _, prop in pairs(workspace.DebugMission.Props:QueryDescendants(`BasePart`)) do
 		if prop.Name:match("Door") then
 			local p0 = (prop.CFrame * CFrame.new(0, -3, DOOR_BUFFER)).p
 			local p1 = (prop.CFrame * CFrame.new(0, -3, -DOOR_BUFFER)).p
@@ -301,7 +301,7 @@ return {
 					Save()
 				end
 			elseif io.KeyCode == Enum.KeyCode.R then
-				if mouse.Target then
+				if CurrentZone and mouse.Target then
 					RemovePart(mouse.Target)
 					Save()
 				end

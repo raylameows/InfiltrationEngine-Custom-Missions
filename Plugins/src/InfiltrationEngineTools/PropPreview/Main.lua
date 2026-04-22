@@ -360,6 +360,7 @@ module.Init = function(mouse: PluginMouse)
 						Archivable = false,
 					},
 					Create("Part", {
+						Anchored = true,
 						TopSurface = Enum.SurfaceType.SmoothNoOutlines,
 						BottomSurface = Enum.SurfaceType.SmoothNoOutlines,
 						Size = scalablePropData.DefaultSize,

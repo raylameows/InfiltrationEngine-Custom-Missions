@@ -12,6 +12,7 @@ local Derived = Actor.Derived
 local module = {}
 module.Active = false
 module.DoorState = {}
+module.DisplayState = {}
 
 local RESTRICTIONS_LIST = {
 	"Never",
@@ -59,7 +60,7 @@ end
 -- Data Load/Unload
 function module:GetDoorsFromLevel()
 	local doors = {}
-	local props = workspace.DebugMission.Props:GetChildren()
+	local props = workspace.DebugMission.Props:QueryDescendants(`BasePart`)
 	for _, part in pairs(props) do
 		if string.match(part.Name, "^Door") then
 			table.insert(doors, part)
@@ -200,6 +201,8 @@ function module:UpdateDisplayedData(data: DoorData)
 				}),
 			}),
 		})
+		
+		self.DisplayState[data.Display] = data.Base
 	end
 end
 
@@ -226,10 +229,19 @@ end
 
 function module:GetHoveredDoor(): (Part?, number?)
 	local part = self.Mouse.Target
-	if part and part:IsA("Part") and self.DoorState[part] then
-		local hit = self.Mouse.Hit.Position
-		local rel = part.CFrame:PointToObjectSpace(hit)
-		return part, if rel.Z < 0 then 1 else 2
+	if part and part:IsA("Part") then
+		local isDoorBase = self.DoorState[part]
+		local isDoorDisplay = self.DisplayState[part]
+		if isDoorDisplay then
+			part = isDoorDisplay
+			isDoorBase = self.DoorState[part]
+		end
+		
+		if isDoorBase then
+			local hit = self.Mouse.Hit.Position
+			local rel = part.CFrame:PointToObjectSpace(hit)
+			return part, if rel.Z < 0 then 1 else 2
+		end
 	end
 	return nil, nil
 end
@@ -364,6 +376,9 @@ module.Init = function(mouse: PluginMouse)
 
 	self:InitUI()
 
+	print("M1 + Mouse on Door - Apply Door Options")
+	print("F / C + Mouse on Door - Copy Door Options")
+	print("F / C - Clear Door Options")
 	self.InputEvent = UserInputService.InputBegan:Connect(module.ProcessInput)
 end
 
@@ -386,6 +401,7 @@ module.Clean = function()
 		end
 	end
 	self.DoorState = {}
+	self.DisplayState = {}
 
 	self:CleanUI()
 end

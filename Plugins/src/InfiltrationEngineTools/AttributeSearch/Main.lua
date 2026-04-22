@@ -1,3 +1,5 @@
+local ScriptEditorService = game:GetService("ScriptEditorService")
+
 local Actor = require(script.Parent.Parent.Util.Actor)
 local Create = Actor.Create
 local State = Actor.State
@@ -10,61 +12,73 @@ local module = {}
 
 local ROW_HEIGHT = 20
 
+local function trim(str)
+	return str:match("^%s*(.-)%s*$")
+end
+
 local SearchText = State("")
 local SearchResults = Derived(function(text)
 	if #text < 3 or not workspace:FindFirstChild("DebugMission") then
 		return {}
 	end
+
 	local results = {}
+	local missionModuleSource = ScriptEditorService:GetEditorSource(workspace.DebugMission.MissionSetup)
 
-	local missionModule = require(workspace.DebugMission.MissionSetup:Clone())
-	local match = {}
+	local function searchSource(prefix, source)
+		local stack = prefix and {prefix} or {}
 
-	local function searchTable(prefix, tbl)
-		for field, value in tbl do
-			if value == "" then
+		for line, content in ipairs(string.split(source, "\n")) do
+			if content == "" then
 				continue
 			end
-			if typeof(value) == "string" then
-				if (typeof(field) == "string" and field:lower():match(text)) or value:lower():match(text) then
-					local entry = if prefix then `{prefix}.{field}` else field
-					match[entry] = value
-				end
-			elseif typeof(value) == "table" then
-				local entry = if prefix then `{prefix}.{field}` else field
-				searchTable(entry, value)
+
+			local trimmedContent = trim(content)
+			local openKey = content:match("^(.-)%s*=%s*{$")
+			if openKey then
+				table.insert(stack, trim(openKey))
+				continue
+			end
+
+			if trimmedContent:match("^}") then
+				table.remove(stack)
+				continue
+			end
+
+			local key = trimmedContent:match("^(.-)%s*=")
+			if key and trimmedContent:lower():match(text) then
+				key = trim(key)
+
+				local fullPath = table.concat(stack, ".")
+				local entry = fullPath ~= "" and (`{fullPath}.{key}`) or key
+				table.insert(results, {
+					Instance = workspace.DebugMission.MissionSetup,
+					Key = entry,
+					Content = trimmedContent,
+					RawContent = content,
+					Line = line,
+				})
 			end
 		end
 	end
-	searchTable(nil, missionModule)
 
-	if next(match) then
-		results[workspace.DebugMission.MissionSetup] = match
-		match = {}
-	end
-
+	searchSource(nil, missionModuleSource)
 	for _, instance in workspace.DebugMission:GetDescendants() do
-		local attributes = instance:GetAttributes()
-		if not next(attributes) then
-			continue
-		end
-
-		for k, v in attributes do
-			if v ~= "" and k:lower() == text or typeof(v) == "string" and v:lower():match(text) then
-				match[k] = tostring(v)
+		for k, v in instance:GetAttributes() do
+			if v ~= "" and (k:lower() == text or (typeof(v) == "string" and v:lower():match(text))) then
+				table.insert(results, {
+					Instance = instance,
+					Key = k,
+					Content = tostring(v),
+				})
 			end
-		end
-
-		if next(match) then
-			results[instance] = match
-			match = {}
 		end
 	end
 
 	if text:lower() == "powerarea" then
 		local areaList = {}
-		for instance in results do
-			local area = instance:GetAttribute("PowerArea")
+		for index, data in results do
+			local area = data.Instance:GetAttribute("PowerArea")
 			if not area then
 				continue
 			end
@@ -105,21 +119,24 @@ local function ClearPropMarkers()
 end
 local function UpdatePropMarkers(list)
 	ClearPropMarkers()
-	for k, v in list do
-		if k:IsA("BasePart") then
+
+	for _, entry in ipairs(list) do
+		local instance = entry.Instance
+
+		if instance and instance:IsA("BasePart") then
 			table.insert(
 				module.PropMarkers,
 				Create("BillboardGui", {
 					Archivable = false,
 					Parent = game:GetService("CoreGui"),
-					Adornee = k,
+					Adornee = instance,
 					Size = UDim2.new(0, 20, 0, 20),
 					AlwaysOnTop = true,
 				}, {
 					Create("Frame", {
 						Size = UDim2.new(0, 20, 0, 20),
 						BorderSizePixel = 0,
-						BackgroundColor3 = StringToColor(next(v) and v[next(v)] or ""),
+						BackgroundColor3 = StringToColor(entry.Content or ""),
 					}, {
 						Create("UICorner", {
 							CornerRadius = UDim.new(0.5, 0),
@@ -132,74 +149,84 @@ local function UpdatePropMarkers(list)
 end
 Watch(UpdatePropMarkers, SearchResults)
 
-local function ListEntry(instance, fields)
-	local fieldCount = 0
-	local contents = {
-		Create("TextLabel", {
-			Size = UDim2.new(0, 200, 0, ROW_HEIGHT),
-			Position = UDim2.new(0, 0, 0, 0),
-			Text = instance.Name,
-			BackgroundTransparency = 1,
-			TextColor3 = Color3.new(1, 1, 1),
-		}),
-	}
+local function Clean(str)
+	return string.gsub(string.gsub(str, `\n`, ``), `	`, ``)
+end
 
-	for k, v in fields do
-		table.insert(
-			contents,
-			Create(
-				"TextLabel",
-				{
-					Size = UDim2.new(0, 200, 0, ROW_HEIGHT),
-					Position = UDim2.new(0, 200, 0, ROW_HEIGHT * fieldCount),
-					Text = k,
-					TextXAlignment = Enum.TextXAlignment.Right,
-					BackgroundTransparency = 1,
-					TextColor3 = Color3.new(1, 1, 1),
-				},
-				Create("UIPadding", {
-					PaddingRight = UDim.new(0, 10),
-				})
-			)
-		)
-		table.insert(
-			contents,
-			Create("TextLabel", {
-				Size = UDim2.new(0, 0, 0, ROW_HEIGHT),
-				Position = UDim2.new(0, 400, 0, ROW_HEIGHT * fieldCount),
-				AutomaticSize = Enum.AutomaticSize.X,
-				Text = tostring(v):gsub("\n", "   "),
-				BackgroundTransparency = 0.6,
-				TextColor3 = Color3.new(1, 1, 1),
-				BackgroundColor3 = Color3.new(0, 0, 0),
-				TextXAlignment = Enum.TextXAlignment.Left,
-				BorderSizePixel = 0,
-			}, {
-				Create("UIPadding", {
-					PaddingRight = UDim.new(0, 10),
-					PaddingLeft = UDim.new(0, 10),
-				}),
-			})
-		)
-		fieldCount += 1
-	end
+local function GetFirstNonTabIndex(str)
+	local i = string.find(str, "%S")
+	return i
+end
 
+local previousListedEntry
+local function ListEntry(index, entry)
+	local instance = entry.Instance
+	
 	local layoutOrder = 0
 	if instance.Name ~= "MissionSetup" then
 		layoutOrder = 1000 * string.byte(instance.Name:lower(), 1, 1) + string.byte(instance.Name:lower(), 2, 2)
 	end
 
-	return Create("TextButton", {
-		Size = UDim2.new(0, 400, 0, fieldCount * ROW_HEIGHT),
+	local button = Create("TextButton", {
+		Size = UDim2.new(0, 400, 0, ROW_HEIGHT),
 		Text = "",
 		BackgroundTransparency = 0.3,
 		BackgroundColor3 = Color3.new(0, 0, 0),
 		BorderSizePixel = 0,
 		LayoutOrder = layoutOrder,
+
 		Activated = function()
 			game.Selection:Set({ instance })
+
+			if entry.Line then
+				ScriptEditorService:OpenScriptDocumentAsync(instance, {
+					HighlightRange = {
+						Start = {Line = entry.Line, Character = GetFirstNonTabIndex(entry.RawContent)},
+						End = {Line = entry.Line, Character = 999},
+					}
+				})
+			end
 		end,
-	}, contents)
+	}, {
+		Create("TextLabel", {
+			Size = UDim2.new(0, 200, 0, ROW_HEIGHT),
+			Position = UDim2.new(0, 0, 0, 0),
+			Text = if previousListedEntry and previousListedEntry.Instance == instance then `` else instance.Name,
+			BackgroundTransparency = 1,
+			TextColor3 = Color3.new(1, 1, 1),
+		}),
+		Create("TextLabel", {
+			Size = UDim2.new(0, 200, 0, ROW_HEIGHT),
+			Position = UDim2.new(0, 200, 0, 0),
+			Text = Clean(entry.Key),
+			TextXAlignment = Enum.TextXAlignment.Right,
+			BackgroundTransparency = 1,
+			TextColor3 = Color3.new(1, 1, 1),
+		}, {
+			Create("UIPadding", {
+				PaddingRight = UDim.new(0, 10),
+			})
+		}),
+		Create("TextLabel", {
+			Size = UDim2.new(0, 0, 0, ROW_HEIGHT),
+			Position = UDim2.new(0, 400, 0, 0),
+			Text = Clean(entry.Content),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			AutomaticSize = Enum.AutomaticSize.X,
+			BackgroundTransparency = 0.6,
+			TextColor3 = Color3.new(1, 1, 1),
+			BackgroundColor3 = Color3.new(0, 0, 0),
+			BorderSizePixel = 0,
+		}, {
+			Create("UIPadding", {
+				PaddingRight = UDim.new(0, 10),
+				PaddingLeft = UDim.new(0, 10),
+			}),
+		})
+	})
+	
+	previousListedEntry = entry
+	return button
 end
 
 local lastTextChange = 0
