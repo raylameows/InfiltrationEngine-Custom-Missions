@@ -1,7 +1,3 @@
-local InsertService = game:GetService("InsertService")
-
-local ENABLE_ARBITRARY_MESHES = true
-
 local InstanceProperties = require(script.Parent.Parent.Types.InstanceProperties)
 local DefaultProperties = require(script.Parent.Parent.Types.DefaultProperties)
 local AttributeTypes = require(script.Parent.Parent.Types.AttributeTypes)
@@ -28,8 +24,9 @@ local function readCFrame(str, cursor, vectorMap)
 	return CFrame.fromMatrix(pos, xVec, yVec), cursor
 end
 
-local function readValue(str, cursor, vType, colorMap, stringMap, vectorMap, refHandler)
+local function readValue(str, cursor, vType, colorMap, stringMap, vectorMap)
 	local value
+	local expensive = false
 	if vType == "Color3" then
 		local colorMapIndex
 		colorMapIndex, cursor = ReadPrimitive.ShortInt(str, cursor)
@@ -44,20 +41,22 @@ local function readValue(str, cursor, vType, colorMap, stringMap, vectorMap, ref
 		value = vectorMap[vecMapIndex]
 	elseif vType == "CFrame" and VersionConfig.UseVectorMap then
 		value, cursor = readCFrame(str, cursor, vectorMap)
-	elseif vType == "InstanceReference" and refHandler ~= nil then
-		local set
-		set, cursor = ReadPrimitive[vType](str, cursor)
-		task.spawn(refHandler, set)
+	elseif vType == "InstanceReference" then
+		value, cursor = ReadPrimitive[vType](str, cursor)
+		expensive = true
 	else
 		value, cursor = ReadPrimitive[vType](str, cursor)
 	end
-	return value, cursor
+	
+	return value, cursor, expensive
 end
 
 local WithAttributes = function(DefaultReader)
 	return function(str, cursor, colorMap, stringMap, vectorMap)
-		local newInstance
-		newInstance, cursor = DefaultReader(str, cursor, colorMap, stringMap, vectorMap)
+		local node
+		node, cursor = DefaultReader(str, cursor, colorMap, stringMap, vectorMap)
+		node.Attributes = {}
+		
 		local attributeId = ReadPrimitive.ShortestInt(str, cursor)
 		cursor += 1
 		while not (attributeId == 0) do
@@ -67,146 +66,70 @@ local WithAttributes = function(DefaultReader)
 			local name = stringMap[nameMapIndex]
 			local value
 			value, cursor = readValue(str, cursor, typeName, colorMap, stringMap, vectorMap)
-			newInstance:SetAttribute(name, value)
+			node.Attributes[name] = value
 			attributeId = ReadPrimitive.ShortestInt(str, cursor)
 			cursor += 1
 		end
-		local attributes = newInstance:GetAttributes()
-		attributes = AttributeValidation.Validate(newInstance.ClassName, newInstance.Name, attributes, true)
-		for i, v in pairs(attributes) do
-			newInstance:SetAttribute(i, v)
+		
+		local attributes = node.Attributes
+		attributes = AttributeValidation.Validate(node.Class, node.Properties.Name, attributes, true)
+		for k, v in (attributes) do
+			node.Attributes[k] = v
 		end
-		return newInstance, cursor
+		
+		return node, cursor
 	end
 end
 
 local ReadInstance
 
-local CreateInstanceReader = function(instanceType, properties)
+local CreateInstanceReader = function(instanceType, properties, protected)
 	local defaults = DefaultProperties[instanceType]
 
 	local InstanceReader = function(str, cursor, colorMap, stringMap, vectorMap)
-		local newInstance = Instance.new(instanceType)
+		local node = {
+			Class = instanceType,
+			Properties = {},
+			Children = {},
+			Protected = protected,
+		}
+		
 		if defaults then
-			for k, v in defaults do
-				newInstance[k] = v
+			for k, v in (defaults) do
+				node.Properties[k] = v
 			end
 		end
-		for i, v in pairs(properties) do -- sets all Instance properties to their default values as defined in InstanceProperties.lua
-			newInstance[v[1]] = v[3]
+		
+		for i, v in (properties) do
+			node.Properties[v[1]] = v[3]
 		end
+		
 		local propertyId = ReadPrimitive.ShortestInt(str, cursor)
 		cursor += 1
 		while not (propertyId == 0) do
 			local typeName = properties[propertyId][1]
 			local valueType = properties[propertyId][2]
-			local value
-			value, cursor = readValue(str, cursor, valueType, colorMap, stringMap, vectorMap, function(setter)
-				newInstance[typeName] = setter()
-			end)
-			if value ~= nil then newInstance[typeName] = value end
+			local value, expensive
+			value, cursor, expensive = readValue(str, cursor, valueType, colorMap, stringMap, vectorMap)
+			if value ~= nil then 
+				if not expensive then
+					node.Properties[typeName] = value 
+				elseif expensive then
+					if not node.Expensives then 
+						node.Expensives = {} 
+					end
+
+					node.Expensives[typeName] = value 
+				end
+			end
+			
 			propertyId = ReadPrimitive.ShortestInt(str, cursor)
 			cursor += 1
 		end
-		return newInstance, cursor
+		
+		return node, cursor
 	end
-	return InstanceReader
-end
-
-local CachedUserMeshFolder = game.ReplicatedStorage:FindFirstChild("Assets")
-if CachedUserMeshFolder then
-	CachedUserMeshFolder = CachedUserMeshFolder:FindFirstChild("LoadedMeshes")
-	if not CachedUserMeshFolder then
-		CachedUserMeshFolder = Instance.new("Folder")
-		CachedUserMeshFolder.Name = "LoadedMeshes"
-		CachedUserMeshFolder.Parent = game.ReplicatedStorage.Assets
-	end
-end
-
-local CreateProtectedInstanceReader = function(instanceType, properties)
-	local defaults = DefaultProperties[instanceType]
-
-	local InstanceReader = function(str, cursor, colorMap, stringMap, vectorMap)
-		local newProperties = {}
-		if defaults then
-			for k, v in defaults do
-				newProperties[k] = v
-			end
-		end
-		for i, v in pairs(properties) do -- sets all Instance properties to their default values as defined in InstanceProperties.lua
-			newProperties[v[1]] = v[3]
-		end
-		local propertyId = ReadPrimitive.ShortestInt(str, cursor)
-		cursor += 1
-		while not (propertyId == 0) do
-			local typeName = properties[propertyId][1]
-			local valueType = properties[propertyId][2]
-			newProperties[typeName], cursor = readValue(str, cursor, valueType, colorMap, stringMap, vectorMap)
-			propertyId = ReadPrimitive.ShortestInt(str, cursor)
-			cursor += 1
-		end
-
-		local newInstance = Instance.new("Part")
-		local instanceInitialized = false
-		local meshId = newProperties.MeshId
-		local id = meshId and newProperties.MeshId:match("%d+")
-		if id and #id > 3 then
-			meshId = id
-		end
-		newProperties.MeshId = nil
-
-		local cachedMeshPart = meshId
-			and (
-				(
-					game.ReplicatedStorage:FindFirstChild("Assets")
-					and game.ReplicatedStorage.Assets:FindFirstChild("ImportParts")
-					and game.ReplicatedStorage.Assets.ImportParts:FindFirstChild(meshId)
-				) or (CachedUserMeshFolder and CachedUserMeshFolder:FindFirstChild(meshId))
-			)
-		if cachedMeshPart then
-			newInstance = cachedMeshPart:Clone()
-			newProperties.CollisionFidelity = nil
-			newProperties.RenderFidelity = nil
-			for k, v in newProperties do
-				newInstance[k] = v
-			end
-			instanceInitialized = true
-		elseif meshId and ENABLE_ARBITRARY_MESHES then
-			-- CreateMeshPartAsync is likely less reliable than cloning, so prefer using ImportParts when possible
-			local success, instOrReason = pcall(function()
-				local part = InsertService:CreateMeshPartAsync(
-					`rbxassetid://{meshId}`,
-					newProperties["CollisionFidelity"] or Enum.CollisionFidelity.Default,
-					newProperties["RenderFidelity"] or Enum.RenderFidelity.Automatic
-				)
-				if CachedUserMeshFolder then
-					local copy = part:Clone()
-					copy.Name = meshId
-					copy.Parent = CachedUserMeshFolder
-				end
-				return part
-			end)
-			newProperties.CollisionFidelity = nil
-			newProperties.RenderFidelity = nil
-			if success then
-				newInstance = instOrReason
-				for k, v in newProperties do
-					newInstance[k] = v
-				end
-				instanceInitialized = true
-			end
-		end
-
-		if not instanceInitialized then
-			for k, v in newProperties do
-				pcall(function()
-					newInstance[k] = v
-				end)
-			end
-		end
-
-		return newInstance, cursor
-	end
+	
 	return InstanceReader
 end
 
@@ -218,8 +141,8 @@ ReadInstance = {
 	BoolValue        = WithAttributes(         CreateInstanceReader("BoolValue", InstanceProperties.BoolValue)),
 	WedgePart        =                         CreateInstanceReader("WedgePart", InstanceProperties.WedgePart),
 	StringValue      =                         CreateInstanceReader("StringValue", InstanceProperties.StringValue),
-	MeshPart         = WithAttributes(CreateProtectedInstanceReader("MeshPart", InstanceProperties.MeshPart)),
-	UnionOperation   = WithAttributes(CreateProtectedInstanceReader("UnionOperation", InstanceProperties.UnionOperation)),
+	MeshPart         = WithAttributes(		   CreateInstanceReader("MeshPart", InstanceProperties.MeshPart, true)),
+	UnionOperation   = WithAttributes(		   CreateInstanceReader("UnionOperation", InstanceProperties.UnionOperation, true)),
 	Texture          =                         CreateInstanceReader("Texture", InstanceProperties.Texture),
 	BlockMesh        =                         CreateInstanceReader("BlockMesh", InstanceProperties.BlockMesh),
 	PointLight       =                         CreateInstanceReader("PointLight", InstanceProperties.PointLight),

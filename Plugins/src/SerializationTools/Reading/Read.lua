@@ -1,6 +1,6 @@
 local InstanceTypes = require(script.Parent.Parent.Types.InstanceTypes)
 local ReadInstance = require(script.Parent.ReadInstance)
-local ReadMissionRoot = require(script.Parent.ReadMissionRoot)
+local ReadBuild = require(script.Parent.ReadBuild)
 
 local EncodingService = game:GetService("EncodingService")
 
@@ -26,6 +26,8 @@ local InstanceKeys = {}
 for i, v in pairs(InstanceTypes) do
 	InstanceKeys[v] = i
 end
+
+local ConstructionData = ReadBuild.getDefaultData()
 
 Read = {
 	VectorMap = function(str, cursor)
@@ -58,7 +60,6 @@ Read = {
 	end,
 
 	Mission = function(str, cursor)
-		
 		if VersionConfig.UseCompression then
 			local uncompressed = buffer.create(#str)
 			buffer.writestring(uncompressed, 0, str)
@@ -66,13 +67,14 @@ Read = {
 			str = buffer.tostring( EncodingService:DecompressBuffer( EncodingService:Base64Decode(uncompressed), Enum.CompressionAlgorithm.Zstd ) )
 		end
 		
-		ReadMissionRoot:Set(nil)
-		
 		local colorMap, stringMap, vectorMap
 		colorMap, cursor = Read.ColorMap(str, cursor)
 		stringMap, cursor = Read.StringMap(str, cursor)
 		vectorMap, cursor = Read.VectorMap(str, cursor)
-		local mission = Read.Instance(str, cursor, colorMap, stringMap, vectorMap)
+		
+		ConstructionData = ReadBuild.getDefaultData()
+		local tree = Read.Instance(str, cursor, colorMap, stringMap, vectorMap)
+		local mission = ReadBuild.construct(tree, ConstructionData)
 
 		-- Reading Color3s from TableMissionSetup
 		local ImportedMissionSetup = game:GetService("HttpService")
@@ -90,7 +92,6 @@ Read = {
 			MissionSetup.Source = StringMissionSetup.Value
 		end
 		
-		ReadMissionRoot:Finalize()
 		return mission
 	end,
 
@@ -99,18 +100,25 @@ Read = {
 		cursor += 1
 		if InstanceId ~= InstanceTypes.Nil then
 			local InstanceType = InstanceKeys[InstanceId]
-			local object, cursor = ReadInstance[InstanceType](str, cursor, colorMap, stringMap, vectorMap)
-			
-			ReadMissionRoot:TrySet(object)
-			
-			while Read.Primitive.ShortestInt(str, cursor) ~= 0 do
-				local child
-				child, cursor = Read.Instance(str, cursor, colorMap, stringMap, vectorMap)
-				if child ~= nil then
-					child.Parent = object
+			local node, cursor = ReadInstance[InstanceType](str, cursor, colorMap, stringMap, vectorMap)
+			if node.Expensives then
+				for _ in (node.Expensives) do
+					ConstructionData.Expensives += 1
 				end
 			end
-			return object, cursor + 1
+			if node.Protected then
+				ConstructionData.Protecteds += 1
+			end
+			
+			while Read.Primitive.ShortestInt(str, cursor) ~= 0 do
+				local childNode
+				childNode, cursor = Read.Instance(str, cursor, colorMap, stringMap, vectorMap)
+				if childNode ~= nil then
+					table.insert(node.Children, childNode)
+				end
+			end
+			
+			return node, cursor + 1
 		else
 			return nil, cursor
 		end

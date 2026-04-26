@@ -1,8 +1,6 @@
 local StringConversion = require(script.Parent.Parent.Util.StringConversion)
 local VersionConfig = require(script.Parent.Parent.Util.VersionConfig)
 
-local ReadMissionRoot = require(script.Parent.ReadMissionRoot)
-
 local SIGNED_INT_BOUND = StringConversion.GetMaxNumber(3) / 2
 local INT_BOUND = StringConversion.GetMaxNumber(4)
 local BOUNDED_FLOAT_BOUND = StringConversion.GetMaxNumber(3)
@@ -133,15 +131,7 @@ ReadPrimitive = {
 
 	InstanceReference = function(str, cursor)
 		local value, cursor = ReadPrimitive.String(str, cursor)
-
-		return function()
-			if ReadMissionRoot:IsSet() then
-				ReadMissionRoot:WaitForFinalize()
-
-				local object = ResolvePath(ReadMissionRoot:Get(), value)
-				return object
-			end
-		end, cursor
+		return value, cursor
 	end,
 
 	BoundedFloat = function(str, cursor) -- returns the value read as a bounded float between 0-1. 3 symbols.
